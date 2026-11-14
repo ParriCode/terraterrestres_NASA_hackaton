@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum
 import math
@@ -13,7 +14,7 @@ DEFAULT_UNITS: dict[str, str] = {
     "time": "s",
     "velocity": "m/s",
     "gravitational_parameter": "m^3/s^2",
-    "masa" : "kg",
+    "mass" : "kg",
 }
 
 
@@ -61,13 +62,13 @@ class CelestialBody:
     name: str
     mu_m3_s2: float
     radius_m: float
-    mass: float
 
+    # Variable validations
     def __post_init__(self) -> None:
         if not self.id or not self.id.strip():
-            raise ValueError("El 'id' del cuerpo celeste no puede estar vacío.")
+            raise ValueError("The 'id' cannot be empty.")
         if not self.name or not self.name.strip():
-            raise ValueError("El 'name' del cuerpo celeste no puede estar vacío.")
+            raise ValueError("The 'name' cannot be empty.")
         validate_positive(self.mu_m3_s2, "mu_m3_s2")
         validate_positive(self.radius_m, "radius_m")
 
@@ -77,6 +78,7 @@ class SpacecraftState:
     position_m: Vec3
     velocity_m_s: Vec3
 
+    # Variable validations
     def __post_init__(self) -> None:
         validate_vec3(self.position_m, "position_m")
         validate_vec3(self.velocity_m_s, "velocity_m_s")
@@ -89,13 +91,35 @@ class SimulationConfig:
     duration_s: float
     step_s: float
 
+    # Variable validations
     def __post_init__(self) -> None:
         if not self.scenario_id or not self.scenario_id.strip():
-            raise ValueError("El 'scenario_id' no puede estar vacío.")
+            raise ValueError("The 'scenario_id' cannot be empty.")
         if not isinstance(self.initial_state, SpacecraftState):
-            raise TypeError("'initial_state' debe ser una instancia de SpacecraftState.")
+            raise TypeError("'initial_state' must be an instance of SpacecraftState.")
         validate_positive(self.duration_s, "duration_s")
         validate_positive(self.step_s, "step_s")
+
+
+@dataclass(frozen=True)
+class Simulation:
+    name: str
+    origin_body: CelestialBody
+    destination_body: CelestialBody
+    date: datetime
+
+    # Variable validations
+    def __post_init__(self) -> None:
+        if not self.name or not self.name.strip():
+            raise ValueError("The 'name' cannot be empty.")
+        if not isinstance(self.origin_body, CelestialBody):
+            raise TypeError("'origin_body' must be an instance of CelestialBody.")
+        if not isinstance(self.destination_body, CelestialBody):
+            raise TypeError("'destination_body' must be an instance of CelestialBody.")
+        if self.origin_body.id == self.destination_body.id:
+            raise ValueError("'origin_body' and 'destination_body' must be different bodies.")
+        if not isinstance(self.date, datetime):
+            raise TypeError("'date' must be a valid datetime instance.")
 
 
 @dataclass(frozen=True)
@@ -104,15 +128,16 @@ class TrajectorySample:
     spacecraft: SpacecraftState
     body_positions_m: dict[str, Vec3]
 
+    # Variable validations
     def __post_init__(self) -> None:
         validate_non_negative(self.t_s, "t_s")
         if not isinstance(self.spacecraft, SpacecraftState):
-            raise TypeError("'spacecraft' debe ser una instancia de SpacecraftState.")
+            raise TypeError("'spacecraft' must be an instance of SpacecraftState.")
         if not self.body_positions_m:
-            raise ValueError("'body_positions_m' debe incluir las posiciones de los cuerpos.")
+            raise ValueError("'body_positions_m' must contain the positions of the bodies.")
         for body_id, pos in self.body_positions_m.items():
             if not body_id:
-                raise ValueError("Las claves de 'body_positions_m' no pueden estar vacías.")
+                raise ValueError("The keys of 'body_positions_m' cannot be empty.")
             validate_vec3(pos, f"body_positions_m['{body_id}']")
 
 
@@ -123,12 +148,13 @@ class Event:
     body_id: str
     position_m: Vec3
 
+    # Variable validations
     def __post_init__(self) -> None:
         if not isinstance(self.type, EventType):
-            raise TypeError(f"'type' debe ser un EventType válido (recibido: {self.type}).")
+            raise TypeError("'type' must be a valid EventType.")
         validate_non_negative(self.t_s, "t_s")
         if not self.body_id or not self.body_id.strip():
-            raise ValueError("'body_id' no puede estar vacío.")
+            raise ValueError("'body_id' cannot be empty.")
         validate_vec3(self.position_m, "position_m")
 
 
@@ -139,10 +165,11 @@ class Diagnostics:
     min_distance_m: dict[str, float]
     min_altitude_m: dict[str, float]
 
+    # Variable validations
     def __post_init__(self) -> None:
         validate_non_negative(self.final_time_s, "final_time_s")
         if isinstance(self.steps_completed, bool) or not isinstance(self.steps_completed, int) or self.steps_completed < 0:
-            raise ValueError("'steps_completed' debe ser un entero mayor o igual que 0.")
+            raise ValueError("'steps_completed' must be an integer greater than or equal to 0.")
         for body_id, dist in self.min_distance_m.items():
             validate_non_negative(dist, f"min_distance_m['{body_id}']")
         for body_id, alt in self.min_altitude_m.items():
@@ -161,16 +188,17 @@ class SimulationResult:
     frame: str = REFERENCE_FRAME
     units: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_UNITS))
 
+    # Variable validations
     def __post_init__(self) -> None:
         if not isinstance(self.status, SimulationStatus):
-            raise TypeError(f"'status' debe ser un SimulationStatus válido (recibido: {self.status}).")
+            raise TypeError("'status' must be a valid SimulationStatus.")
         if not self.samples:
-            raise ValueError("'samples' debe contener al menos la muestra inicial en t_s = 0.")
+            raise ValueError("'samples' must contain at least the initial sample at t_s = 0.")
         if self.samples[0].t_s != 0.0:
-            raise ValueError(f"La primera muestra debe tener t_s = 0.0 (recibido: {self.samples[0].t_s}).")
+            raise ValueError("The first sample must have t_s = 0.0.")
         for i in range(1, len(self.samples)):
             if self.samples[i].t_s <= self.samples[i - 1].t_s:
-                raise ValueError("Los tiempos de las muestras deben ser estrictamente crecientes.")
+                raise ValueError("The sample times must be strictly increasing.")
         for i in range(1, len(self.events)):
             if self.events[i].t_s < self.events[i - 1].t_s:
-                raise ValueError("Los eventos deben estar ordenados cronológicamente.")
+                raise ValueError("The events must be in chronological order.")
