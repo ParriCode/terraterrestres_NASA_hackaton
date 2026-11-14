@@ -1,3 +1,141 @@
+"""Contrato JSON v1 de ORBITAL 4B para FastAPI (Python 3.10+, Pydantic 2).
+
+Los modelos con sufijo Schema representan la API. Las clases del dominio y
+sus validaciones físicas siguen perteneciendo a app.models.domain (Angel).
+
+Uso en el controlador:
+    request: SimulationRequest
+    config = request.to_domain()
+    result = run_simulation(config)
+    response = SimulationResponse.from_domain(result)
+
+FastAPI serializa estos modelos directamente. Para obtener un diccionario
+con listas JSON en lugar de tuplas, usa response.model_dump(mode="json").
+Este módulo se puede importar sin domain.py; to_domain() lo necesita cuando
+se invoque. No comprueba el registro de escenarios ni calcula física.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from enum import Enum
+from typing import TYPE_CHECKING, Annotated, Literal
+
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+if TYPE_CHECKING:
+    from .models.domain import SimulationConfig as DomainSimulationConfig
+    from .models.domain import SimulationResult as DomainSimulationResult
+
+
+# Los enteros JSON también son números válidos; bool y cadenas no lo son.
+FiniteNumber = Annotated[float, Field(strict=True, allow_inf_nan=False)]
+PositiveNumber = Annotated[FiniteNumber, Field(gt=0)]
+NonNegativeNumber = Annotated[FiniteNumber, Field(ge=0)]
+Vec3 = tuple[FiniteNumber, FiniteNumber, FiniteNumber]
+BodyId = Literal["earth", "moon"]
+
+_BODY_IDS = frozenset({"earth", "moon"})
+_UNITS = {
+    "length": "m",
+    "time": "s",
+    "velocity": "m/s",
+    "gravitational_parameter": "m^3/s^2",
+    "masa": "kg",
+}
+
+
+def _enum_value(value: object) -> object:
+    """Acepta también las enumeraciones de domain.py al preparar la respuesta."""
+    return value.value if isinstance(value, Enum) else value
+
+
+EventType = Annotated[Literal["collision"], BeforeValidator(_enum_value)]
+SimulationStatus = Annotated[
+    Literal["completed", "collision", "numerical_error"],
+    BeforeValidator(_enum_value),
+]
+
+
+def _check_body_ids(keys: Iterable[str]) -> None:
+    if set(keys) != _BODY_IDS:
+        raise ValueError("El contrato v1 requiere exactamente earth y moon.")
+
+
+class _Schema(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+        validate_default=True,
+    )
+
+
+class CelestialBodySchema(_Schema):
+    """Propiedades constantes; las posiciones van en cada muestra."""
+
+    id: BodyId
+    name: str = Field(min_length=1)
+    mu_m3_s2: PositiveNumber
+    radius_m: PositiveNumber
+    # Nombre y unidad conservados tal como están en domain.py.
+    mass: PositiveNumber = Field(description="Masa del cuerpo celeste en kg.")
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("name no puede estar vacío.")
+        return value
+
+
+class SpacecraftStateSchema(_Schema):
+    """Estado respecto al baricentro, sin duplicar el tiempo de la muestra."""
+
+    position_m: Vec3
+    velocity_m_s: Vec3
+
+
+class SimulationConfigSchema(_Schema):
+    """Cuerpo de POST /simulations. El integrador v1 es RK2 del punto medio."""
+
+    scenario_id: str = Field(min_length=1)
+    initial_state: SpacecraftStateSchema
+    duration_s: PositiveNumber
+    step_s: PositiveNumber
+
+    @field_validator("scenario_id")
+    @classmethod
+    def scenario_id_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("scenario_id no puede estar vacío.")
+        # Su existencia se comprueba en el servicio usando el registro de Parri.
+        return value
+
+    def to_domain(self) -> DomainSimulationConfig:
+        """Construye los objetos de Angel sin modificar la petición recibida."""
+        from .models.domain import SimulationConfig, SpacecraftState
+
+        return SimulationConfig(
+            scenario_id=self.scenario_id,
+            initial_state=SpacecraftState(
+                position_m=self.initial_state.position_m,
+                velocity_m_s=self.initial_state.velocity_m_s,
+            ),
+            duration_s=self.duration_s,
+            step_s=self.step_s,
+        )
+
+    # step_s puede superar duration_s: el motor acorta el último paso.
+
+
+class TrajectorySampleSchema(_Schema):
     """Nave y cuerpos en el mismo instante t_s."""
 
     t_s: NonNegativeNumber
