@@ -31,7 +31,7 @@ def test_is_collision_rejects_invalid_radius(radius):
 
 
 def test_is_collision_rejects_non_finite_distance():
-    state = SpacecraftState((float("inf"), 0.0, 0.0), (0.0, 0.0, 0.0))
+    state = SpacecraftState((1e308, 0.0, 0.0), (0.0, 0.0, 0.0))
 
     with pytest.raises(ValueError, match="Non-finite distance"):
         is_collision(state, (0.0, 0.0, 0.0), 1.0)
