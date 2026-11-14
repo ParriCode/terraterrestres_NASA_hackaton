@@ -109,6 +109,7 @@ export default function OrbitView({ date, journeys, selectedJourneyId, onSelectJ
   }
   function pointerDown(e: PointerEvent<SVGSVGElement>) {
     if (e.button !== 0) return
+    e.preventDefault() // Inicia movimiento, no selección de texto nativa
     const p = positionFromPointer(e)
     drag.current = { x: p.x, y: p.y, camera, moved: false }
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -139,7 +140,7 @@ export default function OrbitView({ date, journeys, selectedJourneyId, onSelectJ
 
   return <div className="orbital-stage">
     <svg ref={svg} className="orbital-svg" viewBox="0 0 1400 790" preserveAspectRatio="xMidYMid meet"
-      onWheel={wheel} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}
+      onWheel={wheel} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onLostPointerCapture={pointerUp} onDragStart={e => e.preventDefault()}
       role="img" aria-label={scope === 'solar' ? 'Vista interactiva del sistema solar' : 'Vista Tierra y Luna con trayectorias'}>
       <defs>
         <radialGradient id="space-grad"><stop offset="0" stopColor="#11213c" /><stop offset="0.6" stopColor="#091428" /><stop offset="1" stopColor="#050b18" /></radialGradient>
