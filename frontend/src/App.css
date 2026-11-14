@@ -94,6 +94,7 @@
     transform: translateY(-1px);
     box-shadow: 0 8px 30px #5bf5d44d
 }
+
 .icon-button {
     width: 39px;
     height: 39px;
@@ -111,6 +112,7 @@
     color: white;
     border-color: #5b7999
 }
+
 .play-main-button {
     flex: 0 0 41px;
     width: 41px;
@@ -258,7 +260,8 @@
 }
 
 .transfer-form,
-.results-panel {
+.results-panel,
+.tradeoff-panel {
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -266,6 +269,10 @@
     border: 1px solid var(--border);
     border-radius: 14px;
     padding: 16px
+}
+
+.tradeoff-panel h3 {
+    margin-top: 0
 }
 
 .transfer-form label,
@@ -288,42 +295,24 @@
     width: 100%
 }
 
-.transfer-form fieldset {
-    border: 0;
-    margin: 0;
-    padding: 0;
+.assumption-pill {
     display: flex;
     flex-direction: column;
-    gap: 5px
-}
-
-.form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px
-}
-
-.segmented {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    background: #0a1424;
-    border: 1px solid #2b425d;
+    gap: 3px;
+    background: var(--panel-light);
+    border: 1px solid var(--border);
     border-radius: 9px;
-    padding: 3px
+    padding: 9px 11px
 }
 
-.segmented button {
-    border: 0;
-    background: none;
-    color: var(--muted);
-    border-radius: 7px;
-    padding: 8px 4px;
+.assumption-pill span,
+.assumption-pill small {
+    font-size: 10px;
+    color: var(--muted)
+}
+
+.assumption-pill strong {
     font-size: 12px;
-    font-weight: 700
-}
-
-.segmented button.active {
-    background: #1d3352;
     color: var(--text)
 }
 
@@ -405,6 +394,37 @@
     padding: 0
 }
 
+.no-feasible-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    background: #231b12;
+    border: 1px solid #7d5b2b;
+    color: #ffe3b8;
+    border-radius: 12px;
+    padding: 14px;
+    font-size: 12px;
+    line-height: 1.45
+}
+
+.no-feasible-box h2 {
+    color: #ffbd69
+}
+
+.no-feasible-box p {
+    margin: 0;
+    font-size: 11px;
+    color: #e6c697
+}
+
+.no-feasible-box ul {
+    margin: 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px
+}
+
 .result-grid {
     display: grid;
     gap: 8px
@@ -430,6 +450,84 @@
     font-variant-numeric: tabular-nums
 }
 
+.tradeoff-svg {
+    width: 100%;
+    height: auto;
+    display: block
+}
+
+.chart-grid {
+    stroke: rgba(145, 181, 227, .12);
+    stroke-width: 1
+}
+
+.chart-axis {
+    stroke: #38516c;
+    stroke-width: 1
+}
+
+.chart-tick,
+.chart-label {
+    fill: var(--muted);
+    font-size: 9px
+}
+
+.chart-line-lambert {
+    fill: none;
+    stroke: var(--blue);
+    stroke-width: 2;
+    stroke-linejoin: round
+}
+
+.chart-dot-lambert {
+    fill: #8faaff
+}
+
+.chart-dot-validated-halo {
+    fill: rgba(99, 230, 207, .24)
+}
+
+.chart-dot-validated {
+    fill: var(--teal);
+    stroke: #fff;
+    stroke-width: 1
+}
+
+.tradeoff-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 10px;
+    color: var(--muted)
+}
+
+.tradeoff-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px
+}
+
+.tradeoff-legend i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block
+}
+
+.legend-lambert {
+    background: var(--blue)
+}
+
+.legend-validated {
+    background: var(--teal)
+}
+
+.tradeoff-empty {
+    margin: 0;
+    font-size: 11px;
+    color: var(--muted)
+}
+
 .stage {
     position: relative;
     min-width: 0;
@@ -446,7 +544,14 @@
     justify-items: center;
     gap: 10px;
     color: var(--muted);
-    font-size: 14px
+    font-size: 14px;
+    padding: 24px;
+    text-align: center
+}
+
+.no-feasible-stage small {
+    font-size: 12px;
+    color: #9fb3cc
 }
 
 .transfer-view {

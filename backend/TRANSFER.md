@@ -1,6 +1,40 @@
-# Transferencia planar Tierra–Luna
+# Transferencia planar Tierra–Luna y optimizador Δv
 
 Desde `backend/`, instala `pip install -e '.[test]'`.
+
+## Optimizador de misión (`optimize_transfer`)
+
+El flujo guiado optimiza el $\Delta v$ total estimado sujeta a una fecha de salida
+y un tiempo máximo de vuelo (`max_duration_s`), partiendo de una órbita circular
+prograde de aparcamiento terrestre (por defecto `parking_alt_m = 200_000` m):
+
+```python
+from datetime import datetime, timezone
+from app.services.mission_optimizer import optimize_transfer
+
+opt = optimize_transfer(
+    date=datetime(2026, 11, 14, tzinfo=timezone.utc),
+    max_duration_s=10 * 86400,
+    parking_alt_m=200_000.0,
+)
+
+print(opt.transfer.t1_s, opt.transfer.total_delta_v_m_s)
+print(opt.transfer.launch_delta_v_m_s, opt.transfer.arrival_delta_v_m_s)
+```
+
+1. **Cribado rápido (Lambert 2 cuerpos):** explora duraciones desde
+   `min_duration_s = 2,5 días` hasta `max_duration_s` cada `0,5 días`, junto con
+   30 ángulos de salida (cada 12°) y 6 ángulos de llegada (cada 60°) en ambos
+   sentidos (`prograde=True/False`). Estima:
+   $$\Delta v_{\text{est}} = \lVert \mathbf{v}_{\text{dep,rel}} - \mathbf{v}_{\text{circ,prograde}} \rVert + \sqrt{v_\infty^2 + v_{\text{escape,Luna}}^2}$$
+   Los tiempos por debajo de 2,5 días devuelven `no_feasible_solution` por
+   encontrarse fuera del dominio de búsqueda configurado.
+2. **Deduplicación y validación DOP853:** agrupa candidatos por región
+   temporal y angular, valida los mejores representantes con `F()` (propagación
+   DOP853 con eventos Tierra/Luna) y realiza un refinamiento local acotado por
+   `max_duration_s`.
+
+## Modo avanzado / legacy (`design_transfer` y `F`)
 
 ```python
 from datetime import datetime, timezone
@@ -11,60 +45,66 @@ result = design_transfer(
     duration_s=10 * 86400,
     launch_angle_deg=90,
     arrival_angle_deg=0,
-    objective="energia",  # o "distancia"
+    objective="energia",  # "energia", "distancia" o "delta_v"
     mass_kg=1,
+    parking_alt_m=0.0,
 )
 
 position, velocity = result.C(5 * 86400)
 print(result.pos(0), result.speed(0))
-print(result.initial_velocity_m_s)
-print(result.launch_speed_m_s, result.launch_energy_j)
-print(result.path_length_m, result.arrival_error_m)
-print(result.energy(5 * 86400))
+print(result.launch_delta_v_m_s, result.arrival_delta_v_m_s, result.total_delta_v_m_s)
 ```
 
 `design_transfer` carga el catálogo NASA y dos tablas de Horizons (Tierra y
-Luna). Usa interpolación cúbica de Hermite con posiciones y velocidades, con
-muestras horarias por defecto. Una consulta a `C(t)` no realiza peticiones ni
-reintegra la trayectoria. Los tiempos se miden desde la fecha inicial y deben
-estar dentro del intervalo de vuelo; las magnitudes están en SI.
+Luna) usando interpolación cúbica de Hermite. Todas las magnitudes están en SI.
 
-Para especificar directamente los extremos, crea `PlanarScenario(date,
-duration_s)` y llama a `F(x0, x1, t0, t1, "energia", scenario=scenario)`.
-Ambos extremos son tuplas `(x, y, 0)` en las superficies de los cuerpos.
+## Modelo, supuestos y límites
 
-## Modelo y búsqueda
-
-El eje X inicial apunta de Tierra a Luna. El eje Y completa el plano del
-movimiento relativo inicial, calculado con posición y velocidad de Horizons.
-Los ejes permanecen fijos respecto a ICRF, y el origen es el baricentro
-Tierra–Luna (`500@3`). Se proyecta el movimiento real sobre ese plano; se
-ignoran las componentes fuera del plano, la rotación y la gravedad de otros
-cuerpos. Es una aproximación planar con efemérides reales, no una reproducción
-completa de la dinámica del sistema solar. `scenario.basis_icrf` permite
-identificar los ejes usados.
-
-F usa Lambert terrestre como semilla y shooting de dos incógnitas para resolver
-`R(v0) = r(t1; v0) - x1 = 0`. La propagación DOP853 reutiliza la gravedad del
-proyecto, con salida densa, rtol=1e-10 y atol=1e-6. RK2 continúa disponible para
-el flujo de simulaciones existente. Durante la búsqueda se permite prolongar
-matemáticamente una trayectoria dentro de los cuerpos; la validación posterior
-descarta impactos terrestres, contactos lunares anteriores a t1−60 s, salida
-hacia dentro y llegada desde dentro. Tolerancia de llegada: 1000 m.
-
-Prueba ambos sentidos y, si fallan, semillas con tiempos Lambert ±2 %. Selecciona
-la mejor candidata válida encontrada, sin garantizar un óptimo global.
-Si ninguna es válida lanza `TransferNotFoundError`; cambia ángulos o duración.
-
-`launch_energy_j = 0.5 * mass_kg * launch_speed_m_s**2` mide el impulso respecto
-al centro terrestre (sin rotación). `energy(t)` devuelve energía cinética,
-potencial y mecánica en el marco baricéntrico; no se presupone conservación
-porque los cuerpos se mueven con efemérides prescritas. `path_length_m` se
-aproxima con 4000 muestras respecto al centro terrestre en ejes fijos.
+- **Marco planar baricéntrico:** el plano es el del movimiento relativo
+  Tierra–Luna en `t0`, con origen en el baricentro Tierra–Luna (`500@3`), eje X
+  en la proyección del equinoccio vernal (ICRF) y eje Y en el sentido del
+  movimiento lunar. Se ignoran componentes fuera del plano, rotación terrestre y
+  terceros cuerpos (incluido el Sol).
+- **Órbita de aparcamiento:** `v_circ = sqrt(mu_earth / (R_earth + parking_alt_m))`
+  en dirección tangencial prograde. `launch_delta_v_m_s` es la norma de la
+  diferencia vectorial respecto a dicha velocidad circular.
+- **Llegada a la Luna (no es aterrizaje seguro):** `arrival_delta_v_m_s` mide
+  en la propagación DOP853 la velocidad relativa nave–Luna en el contacto con la
+  superficie lunar, asumiendo un frenado impulsivo idealizado hasta velocidad
+  cero. No modela descenso propulsado, guiado ni estabilidad de aterrizaje.
+- **Validación de impactos:** `F()` permite salidas tangenciales o ligeramente
+  interiores desde la órbita de aparcamiento y delega en la detección de eventos
+  de `propagate_planar` el descarte de reimpactos terrestres o contactos lunares
+  anticipados (`t < t1 - 60 s`).
+- **Propelente opcional:** `app/services/propulsion.py` implementa la ecuación
+  ideal del cohete `m_prop = m0 * (1 - exp(-Δv / (Isp * g0)))` únicamente cuando
+  se proporcionan explícitamente masa inicial e `Isp`.
 
 ## API
 
-Arranca `uvicorn app.main:app --reload` y usa `POST /transfers`:
+Arranca `uvicorn app.main:app --reload`:
+
+### `POST /transfers/optimize`
+
+```json
+{
+  "date": "2026-11-14T00:00:00Z",
+  "max_duration_s": 864000,
+  "parking_alt_m": 200000,
+  "samples": 200
+}
+```
+
+Opcionalmente acepta `"initial_mass_kg"` e `"isp_s"` (ambos juntos) para añadir
+la estimación idealizada de propelente.
+
+- Respuestas `200`: `"status": "ok"` (con la transferencia seleccionada, desglose
+  $\Delta v$, muestras y curva `tradeoff` de cribado Lambert) o
+  `"status": "no_feasible_solution"` (con `reasons` y `tradeoff`).
+- Errores: `422` si los parámetros de entrada no son válidos y `502` si falla
+  NASA/JPL Horizons.
+
+### `POST /transfers` (avanzado / legacy)
 
 ```json
 {
@@ -78,14 +118,7 @@ Arranca `uvicorn app.main:app --reload` y usa `POST /transfers`:
 }
 ```
 
-Este endpoint siempre calcula con NASA, independientemente del modo mock de
-`/simulations`. Devuelve las magnitudes y muestras para visualización; una
-función Python no se serializa en JSON. Errores: 502 si falla Horizons y 422 si
-no se encuentra una transferencia válida. El cálculo es síncrono y puede tardar
-si necesita varias semillas; cada petición puede lanzar múltiples integraciones.
-
 Pruebas reproducibles sin red:
-`python -m pytest tests/test_transfer.py tests/test_lambert.py tests/test_shooting.py`.
-Las pruebas usan efemérides circulares controladas, no las sustituyen en producción.
+`python -m pytest tests/test_propulsion.py tests/test_transfer.py tests/test_mission_optimizer.py tests/test_transfer_api.py`.
 
-Referencia de parámetros: https://ssd-api.jpl.nasa.gov/doc/horizons.html
+Referencia de parámetros Horizons: https://ssd-api.jpl.nasa.gov/doc/horizons.html

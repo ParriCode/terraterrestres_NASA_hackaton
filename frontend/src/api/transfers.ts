@@ -1,4 +1,13 @@
-import type { TransferRequest, TransferResponse, Vec3 } from '../types/transfer'
+import type {
+  OptimizeTransferNoFeasibleResponse,
+  OptimizeTransferOkResponse,
+  OptimizeTransferRequest,
+  OptimizeTransferResponse,
+  TradeoffPoint,
+  TransferRequest,
+  TransferResponse,
+  Vec3,
+} from '../types/transfer'
 
 /** Configurable en frontend/.env.local: VITE_API_BASE_URL=http://localhost:8000 */
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
@@ -32,6 +41,17 @@ function describeDetail(detail: unknown): string {
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const isVec3 = (v: unknown): v is Vec3 => Array.isArray(v) && v.length === 3 && v.every(isNum)
 
+function isTradeoffList(value: unknown): value is TradeoffPoint[] {
+  return Array.isArray(value) && value.every(p => {
+    if (!p || typeof p !== 'object') return false
+    const pt = p as Partial<TradeoffPoint>
+    return isNum(pt.duration_s)
+      && isNum(pt.estimated_launch_delta_v_m_s)
+      && isNum(pt.estimated_arrival_delta_v_m_s)
+      && isNum(pt.estimated_total_delta_v_m_s)
+  })
+}
+
 function isTransferResponse(value: unknown): value is TransferResponse {
   if (!value || typeof value !== 'object') return false
   const r = value as Partial<TransferResponse>
@@ -47,8 +67,28 @@ function isTransferResponse(value: unknown): value is TransferResponse {
       && isVec3(p.body_positions_m?.earth) && isVec3(p.body_positions_m?.moon))
 }
 
-export async function requestTransfer(body: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
-  const url = `${API_BASE_URL}/transfers`
+function isOptimizeOkResponse(value: unknown): value is OptimizeTransferOkResponse {
+  if (!isTransferResponse(value)) return false
+  const r = value as Partial<OptimizeTransferOkResponse>
+  return r.status === 'ok'
+    && isNum(r.max_duration_s) && isNum(r.min_search_duration_s) && isNum(r.parking_alt_m)
+    && isNum(r.launch_delta_v_m_s) && isNum(r.arrival_v_infinity_m_s)
+    && isNum(r.arrival_delta_v_m_s) && isNum(r.total_delta_v_m_s)
+    && isTradeoffList(r.tradeoff)
+}
+
+function isOptimizeNoFeasibleResponse(value: unknown): value is OptimizeTransferNoFeasibleResponse {
+  if (!value || typeof value !== 'object') return false
+  const r = value as Partial<OptimizeTransferNoFeasibleResponse>
+  return r.status === 'no_feasible_solution'
+    && typeof r.date === 'string' && Number.isFinite(Date.parse(r.date))
+    && isNum(r.max_duration_s) && isNum(r.min_search_duration_s) && isNum(r.parking_alt_m)
+    && Array.isArray(r.reasons) && r.reasons.every(item => typeof item === 'string')
+    && isTradeoffList(r.tradeoff)
+}
+
+async function postJson(path: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
+  const url = `${API_BASE_URL}${path}`
   const timeout = AbortSignal.timeout(TIMEOUT_MS)
   let response: Response
   try {
@@ -68,6 +108,20 @@ export async function requestTransfer(body: TransferRequest, signal?: AbortSigna
     if (response.status === 502) throw new ApiError(502, `Fallo al consultar las efemérides de NASA/JPL Horizons: ${detail}`)
     throw new ApiError(response.status, `Error del backend (HTTP ${response.status}): ${detail}`)
   }
+  return data
+}
+
+export async function requestTransfer(body: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
+  const data = await postJson('/transfers', body, signal)
   if (!isTransferResponse(data)) throw new ApiError(0, 'El backend respondió con un formato distinto al esperado para /transfers.')
   return data
+}
+
+export async function requestOptimizedTransfer(
+  body: OptimizeTransferRequest,
+  signal?: AbortSignal,
+): Promise<OptimizeTransferResponse> {
+  const data = await postJson('/transfers/optimize', body, signal)
+  if (isOptimizeOkResponse(data) || isOptimizeNoFeasibleResponse(data)) return data
+  throw new ApiError(0, 'El backend respondió con un formato distinto al esperado para /transfers/optimize.')
 }

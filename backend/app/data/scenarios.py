@@ -82,8 +82,11 @@ class PlanarScenarioBody(ScenarioBody):
 class PlanarScenario:
     """Horizons proyectado en el plano orbital inicial, con ejes fijos.
 
-    Origen: baricentro Tierra–Luna. X: Tierra→Luna inicial. Y: sentido del
-    movimiento lunar inicial. Se omite la componente perpendicular al plano.
+    Origen: baricentro Tierra–Luna. Plano: el de la órbita lunar en la fecha
+    inicial. X: equinoccio vernal (eje X de ICRF) proyectado en ese plano, por
+    lo que es la MISMA dirección para cualquier fecha y el ángulo de la Luna en
+    el plano equivale a su longitud eclíptica. Y: completa el triedro en el
+    sentido del movimiento lunar. Se omite la componente perpendicular al plano.
     La dinámica de la nave considera únicamente gravedad terrestre y lunar.
     """
 
@@ -105,14 +108,22 @@ class PlanarScenario:
         }
         relative_position = np.subtract(tables["moon"][1][0], tables["earth"][1][0])
         relative_velocity = np.subtract(tables["moon"][2][0], tables["earth"][2][0])
-        x_axis = relative_position / np.linalg.norm(relative_position)
         normal = np.cross(relative_position, relative_velocity)
         if np.linalg.norm(normal) == 0:
             raise ValueError("No se puede definir el plano orbital inicial.")
         normal /= np.linalg.norm(normal)
+        # Eje X independiente de la fecha: equinoccio vernal proyectado en el plano.
+        # (Antes X = Tierra→Luna en t0, lo que dejaba la Luna siempre en (+X, 0).)
+        vernal_equinox = np.array((1.0, 0.0, 0.0))
+        x_axis = vernal_equinox - np.dot(vernal_equinox, normal) * normal
+        x_axis /= np.linalg.norm(x_axis)
         self.basis_icrf = np.stack((x_axis, np.cross(normal, x_axis)))
         self.bodies = {}
         for key, (times, positions, velocities) in tables.items():
+            # timedelta redondea a µs: la última muestra puede quedar por debajo de
+            # duration_s y pos(duration_s) fallaría. Se fuerza al valor pedido.
+            times = np.array(times, dtype=float)
+            times[-1] = duration_s
             self.bodies[key] = PlanarScenarioBody(
                 catalog[key], date, times,
                 np.asarray(positions) @ self.basis_icrf.T,

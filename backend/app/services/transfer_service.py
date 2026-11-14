@@ -31,7 +31,12 @@ class TransferResult:
     arrival_error_m: float
     mass_kg: float
     objective: str
-    _solution: object = field(repr=False)
+    launch_delta_v_m_s: float
+    arrival_v_infinity_m_s: float
+    arrival_delta_v_m_s: float
+    total_delta_v_m_s: float
+    parking_alt_m: float = 0.0
+    _solution: object = field(repr=False, default=None)
 
     def state(self, time_s: float) -> SpacecraftState:
         """Estado interpolado sin reintegrar, dentro del intervalo del vuelo."""
@@ -64,32 +69,58 @@ class TransferResult:
                 "mechanical_j": float(kinetic + potential)}
 
 
+def orbit_point(body, other, time_s: float, angle_deg: float, altitude_m: float = 0.0) -> Vec3:
+    """Devuelve un punto (x, y, 0) a radio body.radius_m + altitude_m."""
+    center = np.asarray(body.pos(time_s))
+    direction = np.asarray(other.pos(time_s)) - center
+    theta = np.arctan2(direction[1], direction[0]) + np.deg2rad(angle_deg)
+    radius = body.radius_m + altitude_m
+    point = center + radius * np.array((np.cos(theta), np.sin(theta), 0.0))
+    return (float(point[0]), float(point[1]), 0.0)
+
+
+def prograde_circular_velocity(mu_m3_s2: float, rel_pos_m: np.ndarray) -> np.ndarray:
+    """Velocidad circular tangencial prograde (sentido antihorario en XY)."""
+    r_mag = float(np.linalg.norm(rel_pos_m))
+    u_r = rel_pos_m / r_mag
+    u_t = np.array((-u_r[1], u_r[0], 0.0))
+    v_circ = float(np.sqrt(mu_m3_s2 / r_mag))
+    return v_circ * u_t
+
+
 def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
-      scenario: PlanarScenario, mass_kg=1.0, arrival_tolerance_m=1000.0) -> TransferResult:
+      scenario: PlanarScenario, mass_kg=1.0, arrival_tolerance_m=1000.0,
+      parking_alt_m: float = 0.0) -> TransferResult:
     """Busca la mejor candidata válida entre semillas Lambert pro/retrógradas.
 
-    Replica F del documento, sin garantía de óptimo global. La energía de
-    lanzamiento se mide respecto al centro terrestre. La longitud se mide
-    respecto a la Tierra en ejes fijos. Los extremos están en las superficies.
+    Replica F del documento, sin garantía de óptimo global. El punto de salida
+    se sitúa a R_earth + parking_alt_m; el de llegada en la superficie lunar.
+    El Δv de salida se mide respecto a la velocidad circular prograde de aparcamiento
+    y el Δv de llegada asume frenado impulsivo hasta velocidad cero en superficie.
     """
     validate_vec3(x0, "x0")
     validate_vec3(x1, "x1")
     validate_positive(mass_kg, "mass_kg")
     validate_positive(arrival_tolerance_m, "arrival_tolerance_m")
+    if not np.isfinite(parking_alt_m) or parking_alt_m < 0:
+        raise ValueError("parking_alt_m debe ser finito y no negativo.")
     if not 0 <= t0 < t1 <= scenario.duration_s:
         raise ValueError("Se requiere 0 <= t0 < t1 <= duración del escenario.")
     if x0[2] != 0 or x1[2] != 0:
         raise ValueError("F trabaja en 2D: z debe ser cero.")
-    if objetivo not in ("energia", "distancia"):
-        raise ValueError("objetivo debe ser energia o distancia.")
+    if objetivo not in ("energia", "distancia", "delta_v"):
+        raise ValueError("objetivo debe ser energia, distancia o delta_v.")
     earth, moon = scenario.bodies["earth"], scenario.bodies["moon"]
     start, target = np.asarray(x0), np.asarray(x1)
-    for point, body, t in ((start, earth, t0), (target, moon, t1)):
-        if abs(np.linalg.norm(point - body.pos(t)) - body.radius_m) > 1.0:
-            raise ValueError("Los extremos deben estar en las superficies terrestre y lunar.")
+    if abs(np.linalg.norm(start - earth.pos(t0)) - (earth.radius_m + parking_alt_m)) > 1.0:
+        raise ValueError("El extremo inicial debe estar en la órbita de aparcamiento terrestre.")
+    if abs(np.linalg.norm(target - moon.pos(t1)) - moon.radius_m) > 1.0:
+        raise ValueError("El extremo objetivo debe estar en la superficie lunar.")
+
     earth_velocity = np.asarray(earth.speed(t0))
-    normal = start - earth.pos(t0)
-    normal /= np.linalg.norm(normal)
+    rel_start = start - np.asarray(earth.pos(t0))
+    v_circ_vec = prograde_circular_velocity(earth.mu_m3_s2, rel_start)
+    v_esc_moon_sq = 2.0 * moon.mu_m3_s2 / moon.radius_m
     valid, reasons = [], []
 
     def residual(velocity):
@@ -115,9 +146,6 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
                         reasons.append(f"Error de llegada: {shot.residual_norm_m:.1f} m")
                         continue
                     velocity = np.asarray(shot.initial_velocity_m_s)
-                    if np.dot(velocity - earth_velocity, normal) <= 0:
-                        reasons.append("La salida entra en la Tierra")
-                        continue
                     if any(np.linalg.norm(velocity - r.initial_velocity_m_s) < 1 for r in valid):
                         continue
                     solution = propagate_planar(scenario, x0, velocity, t0, t1, events=True)
@@ -140,38 +168,52 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
                         continue
                     times = np.linspace(t0, t1, 4000)
                     relative = solution.sol(times)[:2].T - np.array([earth.pos(t)[:2] for t in times])
+                    # Respaldo ante salidas desde superficie (parking_alt_m=0) con dirección interior en t0.
+                    if float(np.min(np.linalg.norm(relative, axis=1))) < earth.radius_m - 10.0:
+                        reasons.append("La trayectoria penetra en la Tierra")
+                        continue
                     length = float(np.linalg.norm(np.diff(relative, axis=0), axis=1).sum())
-                    launch_speed = float(np.linalg.norm(velocity - earth_velocity))
+                    rel_dep_vel = velocity - earth_velocity
+                    launch_speed = float(np.linalg.norm(rel_dep_vel))
+                    launch_delta_v = float(np.linalg.norm(rel_dep_vel - v_circ_vec))
+                    arrival_delta_v = float(np.linalg.norm(final_velocity - moon.speed(t1)))
+                    arrival_v_inf = float(np.sqrt(max(0.0, arrival_delta_v**2 - v_esc_moon_sq)))
+                    total_delta_v = float(launch_delta_v + arrival_delta_v)
                     valid.append(TransferResult(
                         scenario, t0, t1, shot.initial_velocity_m_s, launch_speed,
                         0.5 * mass_kg * launch_speed**2, length, error,
-                        mass_kg, objetivo, solution,
+                        mass_kg, objetivo, launch_delta_v, arrival_v_inf,
+                        arrival_delta_v, total_delta_v, float(parking_alt_m), solution,
                     ))
                 except (LambertError, RuntimeError, ArithmeticError, ValueError) as error:
                     reasons.append(str(error))
     if not valid:
         raise TransferNotFoundError("No se encontró transferencia válida: " + "; ".join(sorted(set(reasons))))
-    return min(valid, key=lambda r: r.launch_energy_j if objetivo == "energia" else r.path_length_m)
+    if objetivo == "energia":
+        key = lambda r: r.launch_energy_j
+    elif objetivo == "distancia":
+        key = lambda r: r.path_length_m
+    else:
+        key = lambda r: r.total_delta_v_m_s
+    return min(valid, key=key)
 
 
 def design_transfer(date: datetime, duration_s: float, *, launch_angle_deg=90.0,
                     arrival_angle_deg=0.0, objective="energia", mass_kg=1.0,
-                    spacing_s=3600.0) -> TransferResult:
+                    spacing_s=3600.0, parking_alt_m: float = 0.0) -> TransferResult:
     """Carga NASA y llama a F. Alfa: desde Tierra→Luna; beta: Luna→Tierra.
 
     Los ángulos son geométricos del modelo planar, no latitud/longitud.
     """
     if not np.isfinite(launch_angle_deg) or not np.isfinite(arrival_angle_deg):
         raise ValueError("Los ángulos deben ser finitos.")
+    if not np.isfinite(parking_alt_m) or parking_alt_m < 0:
+        raise ValueError("parking_alt_m debe ser finito y no negativo.")
     scenario = PlanarScenario(date, duration_s, spacing_s=spacing_s)
     earth, moon = scenario.bodies["earth"], scenario.bodies["moon"]
-
-    def surface(body, other, time, angle):
-        center = np.asarray(body.pos(time))
-        direction = np.asarray(other.pos(time)) - center
-        theta = np.arctan2(direction[1], direction[0]) + np.deg2rad(angle)
-        return tuple(center + body.radius_m * np.array((np.cos(theta), np.sin(theta), 0.0)))
-
-    return F(surface(earth, moon, 0, launch_angle_deg),
-             surface(moon, earth, duration_s, arrival_angle_deg),
-             0.0, duration_s, objective, scenario=scenario, mass_kg=mass_kg)
+    return F(
+        orbit_point(earth, moon, 0.0, launch_angle_deg, parking_alt_m),
+        orbit_point(moon, earth, duration_s, arrival_angle_deg, 0.0),
+        0.0, duration_s, objective, scenario=scenario, mass_kg=mass_kg,
+        parking_alt_m=parking_alt_m,
+    )

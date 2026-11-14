@@ -115,6 +115,6 @@ export default function TransferView({ transfer, state }: Props) {
       <button className="icon-button" onClick={() => setBox(geometry.home)} aria-label="Encuadrar" title="Encuadrar"><Icon name="crosshair" /></button>
       <button className="icon-button" onClick={() => setBox({ x: moon.x - 15_000, y: moon.y - 9_600, w: 30_000, h: 19_200 })} aria-label="Ver llegada a la Luna" title="Ver llegada a la Luna"><Icon name="target" /></button>
     </div>
-    <div className="view-legend">Plano baricéntrico Tierra–Luna · escala real · rueda para zoom, arrastra para mover</div>
+    <div className="view-legend">Plano baricéntrico Tierra–Luna · +X = equinoccio vernal · escala real · rueda para zoom, arrastra para mover</div>
   </div>
 }
