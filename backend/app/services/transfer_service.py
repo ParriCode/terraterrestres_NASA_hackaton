@@ -96,10 +96,25 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
     normal /= np.linalg.norm(normal)
     valid, reasons = [], []
 
+    body_keys = list(scenario.bodies)
+    earth_index = body_keys.index("earth")
+    moon_index = body_keys.index("moon")
+    length_times = np.linspace(t0, t1, 4000)
+    earth_pos_array = getattr(earth, "pos_array", None)
+    earth_track_xy = (
+        earth_pos_array(length_times)[:, :2]
+        if callable(earth_pos_array)
+        else np.array([earth.pos(float(t))[:2] for t in length_times])
+    )
+
     def residual(velocity):
         if budget_check is not None:
             budget_check()
-        solution = propagate_planar(scenario, x0, velocity, t0, t1, budget_check=budget_check)
+        # Durante shooting no se necesita interpolación densa; basta precisión submilimétrica.
+        solution = propagate_planar(
+            scenario, x0, velocity, t0, t1,
+            dense_output=False, rtol=1e-8, atol=1e-5, budget_check=budget_check,
+        )
         final = solution.y[:2, -1] - target[:2]
         return float(final[0]), float(final[1]), 0.0
 
@@ -128,9 +143,12 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
                         continue
                     if any(np.linalg.norm(velocity - r.initial_velocity_m_s) < 1 for r in valid):
                         continue
-                    solution = propagate_planar(scenario, x0, velocity, t0, t1, events=True, budget_check=budget_check)
-                    earth_index = list(scenario.bodies).index("earth")
-                    moon_index = list(scenario.bodies).index("moon")
+                    # Validación final con salida densa completa para C(t) y métricas.
+                    solution = propagate_planar(
+                        scenario, x0, velocity, t0, t1,
+                        events=True, dense_output=True, rtol=1e-10, atol=1e-7,
+                        budget_check=budget_check,
+                    )
                     if len(solution.t_events[earth_index]):
                         reasons.append("La trayectoria vuelve a tocar la Tierra")
                         continue
@@ -146,9 +164,9 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
                     if np.dot(final_velocity - moon.speed(t1), final_position - moon.pos(t1)) >= 0:
                         reasons.append("La nave no llega desde fuera de la Luna")
                         continue
-                    times = np.linspace(t0, t1, 4000)
-                    relative = solution.sol(times)[:2].T - np.array([earth.pos(t)[:2] for t in times])
-                    length = float(np.linalg.norm(np.diff(relative, axis=0), axis=1).sum())
+                    relative = solution.sol(length_times)[:2].T - earth_track_xy
+                    diffs = np.diff(relative, axis=0)
+                    length = float(np.hypot(diffs[:, 0], diffs[:, 1]).sum())
                     launch_speed = float(np.linalg.norm(velocity - earth_velocity))
                     valid.append(TransferResult(
                         scenario, t0, t1, shot.initial_velocity_m_s, launch_speed,
@@ -270,7 +288,7 @@ def optimize_transfer(
         ensure_time_left()
         attempted.append(angle)
         target = surface(moon, earth, duration_s, angle)
-        candidate_expires = min(expires, time.monotonic() + 13.0)
+        candidate_expires = min(expires, time.monotonic() + 10.0)
 
         def check_candidate_budget():
             ensure_time_left()

@@ -2,6 +2,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
+import numpy as np
 from pydantic import BaseModel, Field, AwareDatetime
 
 from app.data.ephemeris import EphemerisError
@@ -37,6 +38,51 @@ def transfer(request: TransferRequest):
     return serialize_transfer(result, request, arrival_angle_deg=request.arrival_angle_deg)
 
 
+def _serialize_samples(result: TransferResult, duration_s: float, count: int) -> list[dict]:
+    times = np.linspace(0.0, duration_s, count)
+    solution = getattr(result, "_solution", None)
+    sol_fn = getattr(solution, "sol", None)
+    bodies = result.scenario.bodies
+
+    if callable(sol_fn):
+        states = sol_fn(times)
+        xs, ys, vxs, vys = (
+            states[0].tolist(),
+            states[1].tolist(),
+            states[2].tolist(),
+            states[3].tolist(),
+        )
+        body_tracks: dict[str, list[list[float]]] = {}
+        for key, body in bodies.items():
+            pos_array = getattr(body, "pos_array", None)
+            if callable(pos_array):
+                body_tracks[key] = pos_array(times).tolist()
+            else:
+                body_tracks[key] = [list(body.pos(float(t))) for t in times]
+
+        times_list = times.tolist()
+        return [
+            {
+                "t_s": times_list[i],
+                "position_m": [xs[i], ys[i], 0.0],
+                "velocity_m_s": [vxs[i], vys[i], 0.0],
+                "body_positions_m": {key: track[i] for key, track in body_tracks.items()},
+            }
+            for i in range(count)
+        ]
+
+    # Fallback para objetos simulados en pruebas unitarias sin _solution densa.
+    return [
+        {
+            "t_s": float(t),
+            "position_m": result.pos(float(t)),
+            "velocity_m_s": result.speed(float(t)),
+            "body_positions_m": {key: body.pos(float(t)) for key, body in bodies.items()},
+        }
+        for t in times
+    ]
+
+
 def serialize_transfer(
     result: TransferResult, request: TransferRequest, *, arrival_angle_deg: float,
 ) -> dict:
@@ -55,11 +101,7 @@ def serialize_transfer(
         "duration_s": request.duration_s,
         "bodies": {key: {"name": body.name, "radius_m": body.radius_m}
                    for key, body in result.scenario.bodies.items()},
-        "samples": [
-            {"t_s": t, "position_m": result.pos(t), "velocity_m_s": result.speed(t),
-             "body_positions_m": {key: body.pos(t) for key, body in result.scenario.bodies.items()}}
-            for t in (request.duration_s * i / (request.samples - 1) for i in range(request.samples))
-        ],
+        "samples": _serialize_samples(result, request.duration_s, request.samples),
     }
 
 
