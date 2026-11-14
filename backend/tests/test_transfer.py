@@ -65,6 +65,8 @@ def test_controller_exposes_transfer_samples(circular_ephemeris):
     assert payload["arrival_error_m"] < 1000
     assert payload["samples"][-1]["t_s"] == 864000
     assert payload["samples"][0]["velocity_m_s"] == pytest.approx(payload["initial_velocity_m_s"])
+    assert payload["bodies"]["earth"]["radius_m"] == load_bodies()["earth"].radius_m
+    assert payload["bodies"]["moon"]["radius_m"] == load_bodies()["moon"].radius_m
 
 
 def test_request_rejects_dates_without_timezone_and_invalid_mass():

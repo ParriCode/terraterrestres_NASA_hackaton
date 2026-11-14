@@ -32,7 +32,7 @@ def transfer(request: TransferRequest):
         )
     except EphemerisError as error:
         raise HTTPException(502, str(error)) from error
-    except TransferNotFoundError as error:
+    except (TransferNotFoundError, ValueError) as error:
         raise HTTPException(422, str(error)) from error
     return {
         "source": "NASA/JPL Horizons", "date": request.date,
@@ -44,6 +44,9 @@ def transfer(request: TransferRequest):
         "launch_energy_j": result.launch_energy_j,
         "path_length_m": result.path_length_m,
         "arrival_error_m": result.arrival_error_m,
+        "duration_s": request.duration_s,
+        "bodies": {key: {"name": body.name, "radius_m": body.radius_m}
+                   for key, body in result.scenario.bodies.items()},
         "samples": [
             {"t_s": t, "position_m": result.pos(t), "velocity_m_s": result.speed(t),
              "body_positions_m": {key: body.pos(t) for key, body in result.scenario.bodies.items()}}
