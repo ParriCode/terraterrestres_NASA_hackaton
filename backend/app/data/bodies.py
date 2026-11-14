@@ -24,7 +24,12 @@ def load_bodies(
         catalog = json.load(file)
 
     bodies = {
-        body_id: CelestialBody(**body_data)
+        body_id: CelestialBody(
+            id=body_data["id"],
+            name=body_data["name"],
+            mu_m3_s2=body_data["mu_m3_s2"],
+            radius_m=body_data["radius_m"],
+        )
         for body_id, body_data in catalog["bodies"].items()
     }
 
