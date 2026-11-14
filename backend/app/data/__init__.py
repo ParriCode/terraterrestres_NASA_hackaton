@@ -1,0 +1,1 @@
+"""Datos astronómicos y escenarios."""

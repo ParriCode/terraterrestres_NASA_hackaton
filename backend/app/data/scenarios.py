@@ -1,0 +1,1 @@
+"""Escenarios iniciales de simulación."""
