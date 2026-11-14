@@ -10,9 +10,9 @@ const SECONDS_PER_DAY = 86400
 const MAX_DAYS = 30 // backend/app/controllers/transfer_controller.py
 
 function utcNowForInput(): string { return new Date().toISOString().slice(0, 16) }
-type Props = { busy: boolean; onSubmit: (request: TransferRequest) => void; onCancel: () => void }
+type Props = { busy: boolean; onSubmit: (request: TransferRequest) => void; onCancel: () => void; onDateChange?: (date: Date) => void }
 
-export default function TransferForm({ busy, onSubmit, onCancel }: Props) {
+export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }: Props) {
   const [date, setDate] = useState(utcNowForInput)
   const [days, setDays] = useState('10')
   const [mass, setMass] = useState('1000')
@@ -50,7 +50,14 @@ export default function TransferForm({ busy, onSubmit, onCancel }: Props) {
     <h2><Icon name="rocket" size={16} />Crear transferencia Tierra → Luna</h2>
     <p className="form-description">Elige la fecha, los días de vuelo, la masa y el criterio que prefieres optimizar.</p>
     <label>Fecha de salida (UTC)
-      <input type="datetime-local" value={date} onChange={e => setDate(e.target.value)} disabled={busy} required />
+      <input type="datetime-local" value={date} onChange={e => {
+        const value = e.target.value
+        setDate(value)
+        if (value) {
+          const next = new Date(`${value}:00Z`)
+          if (Number.isFinite(next.getTime())) onDateChange?.(next)
+        }
+      }} disabled={busy} required />
     </label>
     <label>Duración (días)
       <input type="number" min="0.5" max={MAX_DAYS} step="0.5" value={days} onChange={e => setDays(e.target.value)} disabled={busy} required />
