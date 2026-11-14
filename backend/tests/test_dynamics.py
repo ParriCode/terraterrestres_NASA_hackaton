@@ -1,9 +1,19 @@
 import pytest
 from datetime import datetime, timezone
 
-from app.models.domain import SpacecraftState, SimulationConfig
+from app.models.domain import CelestialBody, SpacecraftState, SimulationConfig
 from app.data.scenarios import Scenario
 from app.physics.dynamics import state_derivative
+
+
+@pytest.fixture
+def earth_like_body():
+    return CelestialBody("earth", "Earth", 10.0, 1.0)
+
+
+@pytest.fixture
+def initial_state():
+    return SpacecraftState((2.0, 0.0, 0.0), (0.0, 1.0, 0.0))
 
 
 def make_scenario(monkeypatch, body, state):

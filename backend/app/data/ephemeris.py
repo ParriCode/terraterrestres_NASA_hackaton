@@ -22,6 +22,52 @@ class EphemerisError(RuntimeError):
     """No ha sido posible obtener una posición válida de Horizons."""
 
 
+@lru_cache(maxsize=16)
+def get_body_state_table(body: CelestialBody, start: datetime, stop: datetime,
+                         intervals: int) -> tuple:
+    """Tabla uniforme (segundos, posiciones SI, velocidades SI), una petición.
+
+    STEP_SIZE sin unidades indica el número de intervalos entre ambos extremos.
+    """
+    if start.utcoffset() is None or stop.utcoffset() is None or stop <= start:
+        raise ValueError("Se requieren fechas ordenadas con zona horaria.")
+    if not 2 <= intervals <= 10000:
+        raise ValueError("intervals debe estar entre 2 y 10000.")
+    config = next(item for item in CELESTIAL_BODIES if item.id == body.id)
+    params = {
+        "format": "json", "COMMAND": config.horizons_id,
+        "OBJ_DATA": "NO", "MAKE_EPHEM": "YES", "EPHEM_TYPE": "VECTORS",
+        "CENTER": "500@3", "REF_SYSTEM": "ICRF", "REF_PLANE": "FRAME",
+        "TIME_TYPE": "UT", "OUT_UNITS": "KM-S", "VEC_TABLE": "2",
+        "VEC_CORR": "NONE", "CSV_FORMAT": "YES",
+        "START_TIME": "'JD%.10f'" % (start.timestamp() / 86400 + 2440587.5),
+        "STOP_TIME": "'JD%.10f'" % (stop.timestamp() / 86400 + 2440587.5),
+        "STEP_SIZE": str(intervals),
+    }
+    try:
+        with urlopen(f"{HORIZONS_API_URL}?{urlencode(params)}",
+                     timeout=HORIZONS_TIMEOUT_S) as response:
+            payload = json.load(response)
+        if payload.get("error"):
+            raise ValueError(payload["error"])
+        table = payload["result"].split("$$SOE", 1)[1].split("$$EOE", 1)[0].strip()
+        rows = list(csv.reader(io.StringIO(table)))
+        positions, velocities = [], []
+        for row in rows:
+            values = tuple(float(v.replace("D", "E")) * 1000 for v in row[2:8])
+            if len(values) != 6 or not all(math.isfinite(v) for v in values):
+                raise ValueError("Estado inválido en tabla Horizons.")
+            positions.append(values[:3])
+            velocities.append(values[3:])
+        if len(rows) != intervals + 1:
+            raise ValueError("Horizons no devolvió todos los intervalos.")
+        duration = (stop - start).total_seconds()
+        times = tuple(duration * i / intervals for i in range(intervals + 1))
+        return times, tuple(positions), tuple(velocities)
+    except (URLError, TimeoutError, OSError, ValueError, KeyError, IndexError) as error:
+        raise EphemerisError(f"Error obteniendo tabla Horizons: {error}") from error
+
+
 def get_body_time_pos(body: CelestialBody, time: datetime) -> Vec3:
     """Devuelve (x, y, z) en metros, con origen 500@3 y ejes ICRF.
 

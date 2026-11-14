@@ -51,3 +51,73 @@ class Scenario:
 
     def get_bodies(self) -> list[ScenarioBody]:
         return list(self.bodies.values())
+
+
+class PlanarScenarioBody(ScenarioBody):
+    """Movimiento 2D interpolado; conserva la interfaz usada por la física."""
+
+    def __init__(self, body, date, times, positions, velocities):
+        from scipy.interpolate import CubicHermiteSpline
+
+        super().__init__(body, date)
+        self._motion = CubicHermiteSpline(times, positions, velocities, extrapolate=False)
+        self.duration_s = float(times[-1])
+
+    def _check_time(self, time_s):
+        validate_non_negative(time_s, "time_s")
+        if time_s > self.duration_s:
+            raise ValueError("Tiempo fuera de la tabla de efemérides.")
+
+    def pos(self, time_s: float) -> Vec3:
+        self._check_time(time_s)
+        p = self._motion(time_s)
+        return float(p[0]), float(p[1]), 0.0
+
+    def speed(self, time_s: float) -> Vec3:
+        self._check_time(time_s)
+        v = self._motion(time_s, 1)
+        return float(v[0]), float(v[1]), 0.0
+
+
+class PlanarScenario:
+    """Horizons proyectado en el plano orbital inicial, con ejes fijos.
+
+    Origen: baricentro Tierra–Luna. X: Tierra→Luna inicial. Y: sentido del
+    movimiento lunar inicial. Se omite la componente perpendicular al plano.
+    La dinámica de la nave considera únicamente gravedad terrestre y lunar.
+    """
+
+    def __init__(self, date: datetime, duration_s: float, *, spacing_s=3600.0):
+        import math
+        import numpy as np
+        from app.data.ephemeris import get_body_state_table
+        from app.models.domain import validate_positive
+
+        validate_positive(duration_s, "duration_s")
+        validate_positive(spacing_s, "spacing_s")
+        self.date, self.duration_s = date, duration_s
+        catalog = load_bodies()
+        intervals = max(2, math.ceil(duration_s / spacing_s))
+        tables = {
+            key: get_body_state_table(catalog[key], date,
+                                     date + timedelta(seconds=duration_s), intervals)
+            for key in ("earth", "moon")
+        }
+        relative_position = np.subtract(tables["moon"][1][0], tables["earth"][1][0])
+        relative_velocity = np.subtract(tables["moon"][2][0], tables["earth"][2][0])
+        x_axis = relative_position / np.linalg.norm(relative_position)
+        normal = np.cross(relative_position, relative_velocity)
+        if np.linalg.norm(normal) == 0:
+            raise ValueError("No se puede definir el plano orbital inicial.")
+        normal /= np.linalg.norm(normal)
+        self.basis_icrf = np.stack((x_axis, np.cross(normal, x_axis)))
+        self.bodies = {}
+        for key, (times, positions, velocities) in tables.items():
+            self.bodies[key] = PlanarScenarioBody(
+                catalog[key], date, times,
+                np.asarray(positions) @ self.basis_icrf.T,
+                np.asarray(velocities) @ self.basis_icrf.T,
+            )
+
+    def get_bodies(self) -> list[ScenarioBody]:
+        return list(self.bodies.values())
