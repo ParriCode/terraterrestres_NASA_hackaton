@@ -1,4 +1,4 @@
-/** Contrato compartido v1 (Markdown del equipo). No cambiar campos sin acordarlo con P2*/
+/** Contrato compartido v1 (Markdown del equipo). No cambiar campos sin acordarlo con P2 */
 export type Vec3 = [number, number, number]
 export type SimulationStatus = 'completed' | 'collision' | 'numerical_error'
 export type EventType = 'collision'
@@ -48,6 +48,9 @@ export interface SimulationResult {
   diagnostics: Diagnostics
 }
 
+/** Metadatos UI v1, no forman parte de SimulationConfig ni de la petición actual a FastAPI */
+export type JourneyRouteKind = 'earth_moon' | 'lunar_free_return'
+export type OptimizationGoal = 'fuel' | 'time' | 'safety'
 export type JourneyOrigin = 'demo' | 'backend'
 export interface Journey {
   id: string
@@ -56,10 +59,14 @@ export interface Journey {
   visible: boolean
   source: JourneyOrigin
   launch_iso: string
+  /** Opcionales para poder leer misiones guardadas con la versión anterior */
+  route_kind?: JourneyRouteKind
+  optimization_goal?: OptimizationGoal
+  min_flyby_altitude_km?: number
   result: SimulationResult
 }
 
-/** Interfaz PROPUESTA para P5 (no forma parte del contrato v1)*/
+/** Interfaz PROPUESTA para P5 (no forma parte del contrato v1) */
 export interface EphemerisSnapshot {
   epoch_iso: string
   frame: 'ssb_icrf'
