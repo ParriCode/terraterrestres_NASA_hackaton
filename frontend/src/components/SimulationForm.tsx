@@ -31,21 +31,35 @@ export default function SimulationForm({ open, busy, onClose, onDemo, onBackend 
     if (!name.trim() || name.trim().length > 55) { setError('Escribe un nombre de 1 a 55 caracteres.'); return null }
     if (!Number.isFinite(date.getTime())) { setError('Selecciona una fecha de lanzamiento válida.'); return null }
     if (!Number.isFinite(durationH) || durationH <= 0 || durationH > 26280) { setError('La duración debe estar entre 0 y 26.280 horas.'); return null }
-    if (!Number.isFinite(step) || step <= 0 || durationH * 3600 / step > 30_000) { setError('El paso debe ser positivo y producir como máximo 30.000 pasos.'); return null }
+    if (!Number.isFinite(step) || step <= 0 || durationH * 3600 / step > 10_000) { setError('El paso debe ser positivo y producir como máximo 10.000 pasos.'); return null }
     if (routeKind === 'lunar_free_return' && (!Number.isFinite(minAltitudeKm) || minAltitudeKm < 100 || minAltitudeKm > 20000)) {
       setError('La altitud mínima propuesta debe estar entre 100 y 20.000 km.'); return null
     }
     if (!calculateScienceBudget(science, durationH * 3600).goal_has_required_instrument) { setError('Selecciona el instrumento necesario para el objetivo científico.'); return null }
     if (![...position, ...velocity].every(Number.isFinite)) { setError('Las posiciones y velocidades deben ser números finitos.'); return null }
     setError('')
-    const launchIso = date.toISOString()
+        const launchIso = date.toISOString()
+
     return {
-      name: name.trim(), launch_iso: launchIso, route_kind: routeKind,
-      optimization_goal: optimizationGoal, min_flyby_altitude_km: minAltitudeKm, science: { ...science, instrument_ids: [...science.instrument_ids] }, config: {
+      name: name.trim(),
+      launch_iso: launchIso,
+      route_kind: routeKind,
+      optimization_goal: optimizationGoal,
+      min_flyby_altitude_km: minAltitudeKm,
+      science: {
+        ...science,
+        instrument_ids: [...science.instrument_ids],
+      },
+      config: {
         date: launchIso,
-        scenario_id: 'earth_moon_circular_v1', duration_s: durationH * 3600, step_s: step,
-        initial_state: { position_m: position, velocity_m_s: velocity },
-      }
+        scenario_id: 'mock_earth_moon_v1',
+        duration_s: durationH * 3600,
+        step_s: step,
+        initial_state: {
+          position_m: position,
+          velocity_m_s: velocity,
+        },
+      },
     }
   }
   function submit(kind: 'demo' | 'backend') {
@@ -95,7 +109,7 @@ export default function SimulationForm({ open, busy, onClose, onDemo, onBackend 
           <label className="field"><span>Fecha y hora de salida</span><input type="datetime-local" value={start} onChange={e => setStart(e.target.value)} /></label>
           <label className="field"><span>Duración (horas)</span><input type="number" min="1" max="26280" step="1" value={durationH} onChange={e => setDurationH(Number(e.target.value))} /></label>
           <label className="field"><span>Paso RK2 (segundos)</span><input type="number" min="1" step="1" value={step} onChange={e => setStep(Number(e.target.value))} /></label>
-          <label className="field"><span>Escenario</span><input value="earth_moon_circular_v1" readOnly /></label>
+          <label className="field"><span>Escenario</span><input value="mock_earth_moon_v1" readOnly /></label>
         </div>
         <SciencePayloadSelector design={science} duration_s={durationH * 3600} onChange={setScience} />
         <details className="advanced-fields"><summary><Icon name="settings" size={16} />Estado inicial avanzado <span>metros · m/s</span></summary>
@@ -108,7 +122,7 @@ export default function SimulationForm({ open, busy, onClose, onDemo, onBackend 
         {error && <div className="form-error" role="alert"><Icon name="alert" size={17} />{error}</div>}
         <div className="form-note"><Icon name="info" size={16} /><span>{routeKind === 'lunar_free_return'
           ? 'El retorno libre se muestra solamente como DEMO SINTÉTICA. La versión actual de FastAPI no acepta aún búsquedas de trayectorias de retorno y el objetivo de optimización es informativo.'
-          : '«Ver demo» dibuja una ruta inventada. «Simular con Python» propaga el estado inicial con el contrato v1 de Rafa; no optimiza la ruta.'}</span></div>
+          : '«Ver demo» dibuja una ruta inventada. «Simular con Python» usa ahora el escenario mock: datos ficticios, sin física orbital.'}</span></div>
       </div>
       <footer className="modal-footer">
         <button className="secondary-button" disabled={busy} onClick={() => submit('demo')}><Icon name="orbit" size={17} />Ver demo</button>

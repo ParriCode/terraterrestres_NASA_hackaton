@@ -1,6 +1,7 @@
 from copy import deepcopy
 from dataclasses import asdict, replace
 import unittest
+from datetime import datetime, timezone
 
 from app.models.domain import SimulationConfig, SimulationStatus, SpacecraftState
 from app.schemas import SimulationResponse
@@ -15,6 +16,7 @@ class SimulationServiceTests(unittest.TestCase):
     def setUp(self):
         self.config = SimulationConfig(
             "mock_earth_moon_v1", SpacecraftState((2e6, 0.0, 0.0), (0.0, 7500.0, 0.0)), 25, 10,
+            date=datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc),
         )
         self.demo = build_mock_components()
 

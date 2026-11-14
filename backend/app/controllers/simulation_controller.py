@@ -55,6 +55,7 @@ def simulate(
                 "scenario_id": "mock_earth_moon_v1",
                 "initial_state": {"position_m": [2000000, 0, 0], "velocity_m_s": [0, 7500, 0]},
                 "duration_s": 60, "step_s": 10,
+                "date": "2026-11-14T12:00:00Z",
             },
         },
     })],

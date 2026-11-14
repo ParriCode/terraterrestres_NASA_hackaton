@@ -29,16 +29,16 @@ def load_mock_scenario(scenario_id: str) -> ScenarioContext:
         )
     earth = CelestialBody(
         id="earth", name="Tierra (datos ficticios)",
-        mu_m3_s2=4.0e14, radius_m=6.4e6, mass=6.0e24,
+        mu_m3_s2=4.0e14, radius_m=6.4e6,
     )
     moon = CelestialBody(
         id="moon", name="Luna (datos ficticios)",
-        mu_m3_s2=5.0e12, radius_m=1.7e6, mass=7.5e22,
+        mu_m3_s2=5.0e12, radius_m=1.7e6,
     )
     separation_m = 3.8e8
-    total_mass = earth.mass + moon.mass
-    earth_x = -separation_m * moon.mass / total_mass
-    moon_x = separation_m * earth.mass / total_mass
+    total_mu = earth.mu_m3_s2 + moon.mu_m3_s2
+    earth_x = -separation_m * moon.mu_m3_s2 / total_mu
+    moon_x = separation_m * earth.mu_m3_s2 / total_mu
 
     def positions_at(t_s: float) -> dict[str, Vec3]:
         # Copia nueva por muestra: los cuerpos están fijos SOLO en el mock.

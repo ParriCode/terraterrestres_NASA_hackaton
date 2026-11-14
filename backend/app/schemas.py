@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from enum import Enum
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import (
@@ -48,7 +49,6 @@ _UNITS = {
     "time": "s",
     "velocity": "m/s",
     "gravitational_parameter": "m^3/s^2",
-    "masa": "kg",
 }
 
 
@@ -84,8 +84,6 @@ class CelestialBodySchema(_Schema):
     name: str = Field(min_length=1)
     mu_m3_s2: PositiveNumber
     radius_m: PositiveNumber
-    # Nombre y unidad conservados tal como están en domain.py.
-    mass: PositiveNumber = Field(description="Masa del cuerpo celeste en kg.")
 
     @field_validator("name")
     @classmethod
@@ -109,6 +107,21 @@ class SimulationConfigSchema(_Schema):
     initial_state: SpacecraftStateSchema
     duration_s: PositiveNumber
     step_s: PositiveNumber
+    date: datetime
+
+    @field_validator("date", mode="before")
+    @classmethod
+    def date_input_type(cls, value):
+        if not isinstance(value, (str, datetime)):
+            raise ValueError("date debe ser una fecha ISO 8601 con zona horaria.")
+        return value
+
+    @field_validator("date")
+    @classmethod
+    def date_in_utc(cls, value: datetime) -> datetime:
+        if value.utcoffset() is None:
+            raise ValueError("date debe incluir zona horaria, por ejemplo Z o +01:00.")
+        return value.astimezone(timezone.utc)
 
     @field_validator("scenario_id")
     @classmethod
@@ -130,6 +143,7 @@ class SimulationConfigSchema(_Schema):
             ),
             duration_s=self.duration_s,
             step_s=self.step_s,
+            date=self.date,
         )
 
     # step_s puede superar duration_s: el motor acorta el último paso.

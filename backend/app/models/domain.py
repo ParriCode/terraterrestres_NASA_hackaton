@@ -114,7 +114,7 @@ class SimulationConfig:
             raise ValueError("'date' must include a timezone.")
 
 
-# Une en un tiempo el estado de la nave y las posiciones de los cuerpos
+
 @dataclass(frozen=True)
 class TrajectorySample:
     t_s: float
