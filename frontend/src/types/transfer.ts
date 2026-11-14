@@ -6,7 +6,6 @@ export type TransferRequest = {
   date: string // ISO 8601 con zona horaria
   duration_s: number
   launch_angle_deg: number
-  arrival_angle_deg: number
   objective: TransferObjective
   mass_kg: number
   samples: number
@@ -31,6 +30,7 @@ export type TransferResponse = {
   initial_velocity_m_s: Vec3
   launch_speed_m_s: number
   launch_energy_j: number
+  arrival_angle_deg: number // ángulo que eligió el optimizador de /transfers/optimize
   path_length_m: number
   arrival_error_m: number
   duration_s: number

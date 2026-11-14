@@ -39,7 +39,7 @@ function isTransferResponse(value: unknown): value is TransferResponse {
   return r.frame === 'earth_moon_barycentric_initial_orbital_plane'
     && typeof r.date === 'string' && Number.isFinite(Date.parse(r.date))
     && isVec3(r.initial_velocity_m_s) && isNum(r.launch_speed_m_s) && isNum(r.launch_energy_j)
-    && isNum(r.path_length_m) && isNum(r.arrival_error_m) && isNum(r.duration_s)
+    && isNum(r.path_length_m) && isNum(r.arrival_error_m) && isNum(r.duration_s) && isNum(r.arrival_angle_deg)
     && isNum(r.bodies?.earth?.radius_m) && isNum(r.bodies?.moon?.radius_m)
     && Array.isArray(s) && s.length >= 2 && s[0].t_s === 0
     && s.every((p, i) => isNum(p.t_s) && (i === 0 || p.t_s > s[i - 1].t_s)
@@ -48,7 +48,7 @@ function isTransferResponse(value: unknown): value is TransferResponse {
 }
 
 export async function requestTransfer(body: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
-  const url = `${API_BASE_URL}/transfers`
+  const url = `${API_BASE_URL}/transfers/optimize`
   const timeout = AbortSignal.timeout(TIMEOUT_MS)
   let response: Response
   try {
@@ -64,10 +64,11 @@ export async function requestTransfer(body: TransferRequest, signal?: AbortSigna
   const data: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     const detail = describeDetail((data as { detail?: unknown } | null)?.detail) || response.statusText
+    if (response.status === 404 || response.status === 405) throw new ApiError(response.status, "Rafa debe habilitar POST /transfers/optimize para buscar el ángulo de llegada. El endpoint /transfers actual sólo calcula con un ángulo fijo; no se usará 0° como supuesto óptimo.")
     if (response.status === 422) throw new ApiError(422, `No se pudo calcular la transferencia: ${detail}`)
     if (response.status === 502) throw new ApiError(502, `Fallo al consultar las efemérides de NASA/JPL Horizons: ${detail}`)
     throw new ApiError(response.status, `Error del backend (HTTP ${response.status}): ${detail}`)
   }
-  if (!isTransferResponse(data)) throw new ApiError(0, 'El backend respondió con un formato distinto al esperado para /transfers.')
+  if (!isTransferResponse(data)) throw new ApiError(0, 'El backend respondió con un formato distinto al esperado para /transfers/optimize (debe incluir arrival_angle_deg elegido por el optimizador).')
   return data
 }

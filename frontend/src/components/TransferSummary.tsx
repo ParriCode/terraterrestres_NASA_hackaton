@@ -19,6 +19,8 @@ export default function TransferSummary({ transfer, state }: Props) {
         <small>{transfer.mass_kg} kg, respecto a la Tierra</small></div>
       <div><span>Longitud del recorrido</span><strong>{formatKm(transfer.path_length_m)}</strong></div>
       <div><span>Error de llegada</span><strong>{formatMeters(transfer.arrival_error_m)}</strong></div>
+      <div><span>Ángulo de llegada seleccionado</span><strong>{transfer.arrival_angle_deg.toLocaleString('es-ES', { maximumFractionDigits: 2 })}°</strong>
+        <small>Mejor candidato evaluado, sin garantía de óptimo global</small></div>
     </div>
     <h3><Icon name="clock" size={14} />Instante seleccionado</h3>
     <div className="result-grid">
