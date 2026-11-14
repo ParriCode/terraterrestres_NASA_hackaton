@@ -54,6 +54,12 @@ def validate_vec3(vec: Vec3, field_name: str) -> None:
         validate_finite(component, f"{field_name}[{idx}]")
 
 
+def validate_non_empty_str(value: object, field_name: str) -> None:
+    if not isinstance(value, str):
+        raise TypeError(f"Field '{field_name}' must be a string (received: {type(value).__name__}).")
+    if not value.strip():
+        raise ValueError(f"Field '{field_name}' cannot be empty.")
+
 # --- Estructuras del dominio ---
 
 # Guarda un cuerpo celeste con su id, nombre, valor gravitatorio y radio
@@ -66,10 +72,8 @@ class CelestialBody:
 
     # Variable validations
     def __post_init__(self) -> None:
-        if not self.id or not self.id.strip():
-            raise ValueError("The 'id' cannot be empty.")
-        if not self.name or not self.name.strip():
-            raise ValueError("The 'name' cannot be empty.")
+        validate_non_empty_str(self.id, "id")
+        validate_non_empty_str(self.name, "name")
         validate_positive(self.mu_m3_s2, "mu_m3_s2")
         validate_positive(self.radius_m, "radius_m")
 
@@ -98,8 +102,7 @@ class SimulationConfig:
 
     # Variable validations
     def __post_init__(self) -> None:
-        if not self.scenario_id or not self.scenario_id.strip():
-            raise ValueError("The 'scenario_id' cannot be empty.")
+        validate_non_empty_str(self.scenario_id, "scenario_id")
         if not isinstance(self.initial_state, SpacecraftState):
             raise TypeError("'initial_state' must be an instance of SpacecraftState.")
         validate_positive(self.duration_s, "duration_s")
@@ -143,8 +146,7 @@ class Event:
         if not isinstance(self.type, EventType):
             raise TypeError("'type' must be a valid EventType.")
         validate_non_negative(self.t_s, "t_s")
-        if not self.body_id or not self.body_id.strip():
-            raise ValueError("'body_id' cannot be empty.")
+        validate_non_empty_str(self.body_id, "body_id")
         validate_vec3(self.position_m, "position_m")
 
 
