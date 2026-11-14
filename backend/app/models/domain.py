@@ -94,6 +94,7 @@ class SimulationConfig:
     initial_state: SpacecraftState
     duration_s: float
     step_s: float
+    date: datetime
 
     # Variable validations
     def __post_init__(self) -> None:
@@ -103,28 +104,10 @@ class SimulationConfig:
             raise TypeError("'initial_state' must be an instance of SpacecraftState.")
         validate_positive(self.duration_s, "duration_s")
         validate_positive(self.step_s, "step_s")
-
-
-# Define una misión con nombre, cuerpo de salida y llegada y fecha
-@dataclass(frozen=True)
-class Simulation:
-    name: str
-    origin_body: CelestialBody
-    destination_body: CelestialBody
-    date: datetime
-
-    # Variable validations
-    def __post_init__(self) -> None:
-        if not self.name or not self.name.strip():
-            raise ValueError("The 'name' cannot be empty.")
-        if not isinstance(self.origin_body, CelestialBody):
-            raise TypeError("'origin_body' must be an instance of CelestialBody.")
-        if not isinstance(self.destination_body, CelestialBody):
-            raise TypeError("'destination_body' must be an instance of CelestialBody.")
-        if self.origin_body.id == self.destination_body.id:
-            raise ValueError("'origin_body' and 'destination_body' must be different bodies.")
         if not isinstance(self.date, datetime):
-            raise TypeError("'date' must be a valid datetime instance.")
+            raise TypeError("'date' must be a datetime instance.")
+        if self.date.utcoffset() is None:
+            raise ValueError("'date' must include a timezone.")
 
 
 # Une en un tiempo el estado de la nave y las posiciones de los cuerpos
