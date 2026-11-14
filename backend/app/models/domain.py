@@ -15,7 +15,6 @@ DEFAULT_UNITS: dict[str, str] = {
     "time": "s",
     "velocity": "m/s",
     "gravitational_parameter": "m^3/s^2",
-    "mass" : "kg",
 }
 
 
