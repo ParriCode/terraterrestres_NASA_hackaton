@@ -1,9 +1,15 @@
-"""Integrador del punto medio RK2."""
+"""Integrador RK2 explicito del punto medio y eventos de impacto (contrato v1).
+
+Escenario: Tierra-Luna, una nave de prueba, solo gravedad; sin maniobras.
+Devuelve (samples, events, SimulationStatus) sin modificar el dominio comun.
+"""
 
 import math
 from collections.abc import Sequence
+
 from app.data.scenarios import Scenario
 from app.models.domain import (
+    CelestialBody,
     Event,
     SimulationConfig,
     SimulationStatus,
@@ -11,491 +17,317 @@ from app.models.domain import (
     TrajectorySample,
     Vec3,
 )
-from app.physics.dynamics import state_derivative
-from app.physics.events import (
-    CollidableBody,
-    find_colliding_body,
-    is_collision,
-    swept_collision_closest_fraction,
-)
+from app.physics.dynamics import get_body_position_m, state_derivative
+from app.physics.events import find_colliding_body, segment_min_distance_sq
 from app.physics.gravity import GravityError
 
-COLLISION_TIME_TOLERANCE_S = 1e-6
-MAX_BISECTION_ITERATIONS = 80
+# Limites internos de seguridad (no son campos nuevos de SimulationConfig).
+_MAX_STEP_RETRIES = 48
+_MIN_STEP_S = 1e-6
+_IMPACT_TIME_TOLERANCE_S = 1e-3
 
-"""
-!Recibe dos Vec3 y hace la suma de vector
-@param a Vector 1
-@param b Vector 2
-@return Suma de los vectores
-"""
+
 def vec_add(a: Vec3, b: Vec3) -> Vec3:
-    return (
-        a[0] + b[0],
-        a[1] + b[1],
-        a[2] + b[2],
-    )
+    """Suma de dos vectores 3D."""
+    return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
 
-"""
-!Recibe un Vec3 y una escala
-@param v Vector a reescalar
-@param scalar Coeficiente de escala
-@return Vector reescalado
-"""
+
 def vec_scale(v: Vec3, scalar: float) -> Vec3:
-    return (
-        v[0] * scalar,
-        v[1] * scalar,
-        v[2] * scalar,
+    """Producto de un vector 3D por un escalar."""
+    return (v[0] * scalar, v[1] * scalar, v[2] * scalar)
+
+
+def _norm(v: Vec3) -> float:
+    return math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
+
+
+def _valid_state(state: SpacecraftState) -> bool:
+    return all(
+        math.isfinite(component)
+        for vector in (state.position_m, state.velocity_m_s)
+        for component in vector
     )
 
-"""
-!Recibe tiempo t_s, el estado actual del SpacecraftState, un paso de step_s (los segundos a avanzar) y un Scenario, calcula el próximo estado del SpacecraftState aplicando Runge-Kutta de 2 pasos
-@return Nuevo estado de SpacecraftState pasado step_s desde t_s
-"""
+
 def rk2_step(
     t_s: float,
     state: SpacecraftState,
     step_s: float,
     scenario: Scenario,
 ) -> SpacecraftState:
+    """Un paso RK2 del punto medio, consultando cuerpos en t y t+h/2."""
     if not math.isfinite(t_s) or t_s < 0:
         raise ValueError("Invalid simulation time")
-
-    if not math.isfinite(step_s) or step_s <= 0:
+    if not math.isfinite(step_s) or step_s <= 0 or t_s + step_s == t_s:
         raise ValueError("Invalid integration step")
+    if not _valid_state(state):
+        raise ValueError("Invalid spacecraft state")
 
-    dr_1, dv_1 = state_derivative(
-        t_s,
-        state,
-        scenario,
-    )
-
+    dr1, dv1 = state_derivative(t_s, state, scenario)
+    half_step = 0.5 * step_s
     midpoint_state = SpacecraftState(
-        position_m = vec_add(
-            state.position_m,
-            vec_scale(dr_1, step_s/2),
-        ),
-        velocity_m_s = vec_add(
-            state.velocity_m_s,
-            vec_scale(dv_1, step_s/2),
-        ),
+        position_m=vec_add(state.position_m, vec_scale(dr1, half_step)),
+        velocity_m_s=vec_add(state.velocity_m_s, vec_scale(dv1, half_step)),
     )
-
-    midpoint_time = t_s + step_s/2
-
-    dr_2, dv_2 = state_derivative(
-        midpoint_time,
-        midpoint_state,
-        scenario,
-    )
-
+    dr2, dv2 = state_derivative(t_s + half_step, midpoint_state, scenario)
     next_state = SpacecraftState(
-        position_m = vec_add(
-            state.position_m,
-            vec_scale(dr_2, step_s),
-        ),
-        velocity_m_s = vec_add(
-            state.velocity_m_s,
-            vec_scale(dv_2, step_s),
-        ),
+        position_m=vec_add(state.position_m, vec_scale(dr2, step_s)),
+        velocity_m_s=vec_add(state.velocity_m_s, vec_scale(dv2, step_s)),
     )
-
+    if not _valid_state(next_state):
+        raise ArithmeticError("RK2 produced a non-finite state")
     return next_state
 
-"""
-!Dado un escenario scenario y un tiempo t_s, devuelve las posiciones de las planetas según su id
-@param scenario Escenario a considerar
-@param t_s Tiempo a considerar
-@return Hash table de id de planeta con su posición
-"""
+
 def _body_positions_at(
     scenario: Scenario,
     t_s: float,
+    bodies: Sequence[CelestialBody] | None = None,
 ) -> dict[str, Vec3]:
-
-    return {
-        body_id: body.pos(t_s)
-        for body_id, body in scenario.bodies.items()
-    }
-
-"""
-Dado un tiempo t0, un estado inicial state0, un tiempo t y un escenario, devuelve el estado que llegaría mediante Runge-Kutta
-@param t0 Tiempo inicial
-@param state0 Estado inicial
-@param t Tiempo a calcular el nuevo estado
-@param scenario La instancia del escenario
-@return EL estado en la instancia t, con t0 la instancia inicial
-"""
-def _state_at(
-    t0: float,
-    state0: SpacecraftState,
-    t: float,
-    scenario: Scenario,
-) -> SpacecraftState:
-
-    if not math.isfinite(t0) or not math.isfinite(t):
-        raise ValueError("Invalid time")
-
-    if t < t0:
-        raise ValueError("Target time precedes initial time")
-
-    if t == t0:
-        return state0
-
-    return rk2_step(
-        t0,
-        state0,
-        t - t0,
-        scenario,
-    )
-
-"""
-Calcula el primer momento de colisión dado un tiempo inicial t0, tiempo final t1 y sus correspondientes estados, tenienndo en cuenta una tolerancia de tolerance_s
-"""
-def _locate_body_collision(
-    t0: float,
-    state0: SpacecraftState,
-    t1: float,
-    state1: SpacecraftState,
-    body: CollidableBody,
-    body_start_m: Vec3,
-    body_end_m: Vec3,
-    scenario: Scenario,
-    tolerance_s: float,
-) -> tuple[float, SpacecraftState] | None:
-
-    if is_collision(
-        state1,
-        body_end_m,
-        body.radius_m,
-    ):
-        candidate_t = t1
-
-    else:
-        fraction = swept_collision_closest_fraction(
-            state0.position_m,
-            state1.position_m,
-            body_start_m,
-            body_end_m,
-            body.radius_m,
-        )
-
-        if fraction is None:
-            return None
-
-        candidate_t = t0 + fraction * (t1 - t0)
-
-        if candidate_t <= t0:
-            return None
-
-        candidate_state = _state_at(
-            t0,
-            state0,
-            candidate_t,
-            scenario,
-        )
-
-        candidate_body_position = body.pos(candidate_t)
-
-        if not is_collision(
-            candidate_state,
-            candidate_body_position,
-            body.radius_m,
-        ):
-            return None
-
-    left_t = t0
-    right_t = candidate_t
-
-    for _ in range(MAX_BISECTION_ITERATIONS):
-
-        if right_t - left_t <= tolerance_s:
-            break
-
-        mid_t = (left_t + right_t) / 2
-
-        mid_state = _state_at(
-            t0,
-            state0,
-            mid_t,
-            scenario,
-        )
-
-        mid_body_position = body.pos(mid_t)
-
-        if is_collision(
-            mid_state,
-            mid_body_position,
-            body.radius_m,
-        ):
-            right_t = mid_t
-        else:
-            left_t = mid_t
-
-    impact_state = _state_at(
-        t0,
-        state0,
-        right_t,
-        scenario,
-    )
-
-    return right_t, impact_state
-
-def _locate_collision(
-    t0: float,
-    state0: SpacecraftState,
-    t1: float,
-    state1: SpacecraftState,
-    start_positions_m: dict[str, Vec3],
-    end_positions_m: dict[str, Vec3],
-    scenario: Scenario,
-    bodies: Sequence[CollidableBody],
-    tolerance_s: float = COLLISION_TIME_TOLERANCE_S,
-) -> tuple[
-    float,
-    SpacecraftState,
-    dict[str, Vec3],
-    CollidableBody,
-] | None:
-    """
-    Localiza el primer impacto, considerando todos los cuerpos.
-
-    Si hay varios impactos posibles dentro del intervalo, devuelve
-    el que sucede primero.
-    """
-
-    if tolerance_s <= 0 or not math.isfinite(tolerance_s):
-        raise ValueError("Invalid collision time tolerance")
-
-    earliest_collision = None
-
+    """Usa el mismo proveedor de posiciones que dynamics.py."""
+    if bodies is None:
+        bodies = scenario.get_bodies()
+    result: dict[str, Vec3] = {}
     for body in bodies:
+        position = get_body_position_m(scenario, body, t_s)
+        if len(position) != 3 or not all(math.isfinite(v) for v in position):
+            raise GravityError(f"Invalid ephemeris position for {body.id} at t={t_s}")
+        result[body.id] = position
+    return result
 
-        if body.id not in start_positions_m:
-            raise ValueError(f"Missing initial position for {body.id}")
 
-        if body.id not in end_positions_m:
-            raise ValueError(f"Missing final position for {body.id}")
+def _safe_step_s(
+    t_s: float,
+    state: SpacecraftState,
+    step_s: float,
+    body_positions: dict[str, Vec3],
+    bodies: Sequence[CelestialBody],
+    scenario: Scenario,
+) -> float:
+    """Limita saltos excesivos que podrian atravesar una esfera entre muestras.
 
-        result = _locate_body_collision(
-            t0,
-            state0,
-            t1,
-            state1,
-            body,
-            start_positions_m[body.id],
-            end_positions_m[body.id],
-            scenario,
-            tolerance_s,
-        )
+    El valor solicitado sigue siendo el MAXIMO; cerca de un cuerpo se subdivide
+    por escala de movimiento relativo y por escala gravitatoria. No es un
+    integrador de tolerancia adaptativa ni una garantia matematica absoluta.
+    """
+    future_positions = _body_positions_at(scenario, t_s + step_s, bodies)
+    limit = step_s
+    for body in bodies:
+        pos = body_positions[body.id]
+        next_pos = future_positions[body.id]
+        relative_position = tuple(s - b for s, b in zip(state.position_m, pos))
+        distance = _norm(relative_position)
+        if not math.isfinite(distance) or distance <= 0:
+            raise GravityError(f"Invalid distance to {body.id}")
 
-        if result is None:
-            continue
+        body_velocity = tuple((b - a) / step_s for a, b in zip(pos, next_pos))
+        relative_velocity = tuple(s - b for s, b in zip(state.velocity_m_s, body_velocity))
+        speed = _norm(relative_velocity)
+        if not math.isfinite(speed):
+            raise GravityError("Invalid relative speed")
+        if speed > 0:
+            limit = min(limit, 0.25 * distance / speed)
+        if body.mu_m3_s2 > 0:
+            limit = min(limit, 0.15 * math.sqrt(distance**3 / body.mu_m3_s2))
+    return limit
 
-        impact_time, impact_state = result
 
-        if (
-            earliest_collision is None
-            or impact_time < earliest_collision[0]
-        ):
-            impact_positions = _body_positions_at(
-                scenario,
-                impact_time,
-            )
+def _refine_collision(
+    t_s: float,
+    state: SpacecraftState,
+    step_s: float,
+    end_state: SpacecraftState,
+    colliding_body: CelestialBody,
+    bodies: Sequence[CelestialBody],
+    scenario: Scenario,
+) -> tuple[float, SpacecraftState, dict[str, Vec3]]:
+    """Biseccion temporal: el inicio es exterior y el final es interior.
 
-            earliest_collision = (
-                impact_time,
-                impact_state,
-                impact_positions,
-                body,
-            )
+    En todo momento RK2 recibe DURACION desde t_s, no un tiempo absoluto.
+    """
+    low_s = 0.0
+    high_s = step_s
+    hit_state = end_state
+    for _ in range(80):
+        if high_s - low_s <= _IMPACT_TIME_TOLERANCE_S:
+            break
+        middle_s = low_s + (high_s - low_s) * 0.5
+        mid_state = rk2_step(t_s, state, middle_s, scenario)
+        mid_t_s = t_s + middle_s
+        mid_pos = get_body_position_m(scenario, colliding_body, mid_t_s)
+        delta = tuple(a - b for a, b in zip(mid_state.position_m, mid_pos))
+        if sum(value * value for value in delta) <= colliding_body.radius_m**2:
+            high_s = middle_s
+            hit_state = mid_state
+        else:
+            low_s = middle_s
+    hit_t_s = t_s + high_s
+    return hit_t_s, hit_state, _body_positions_at(scenario, hit_t_s, bodies)
 
-    return earliest_collision
 
-"""
-Ejecuta la simulación completa.
+def _maybe_hidden_collision(
+    state: SpacecraftState,
+    next_state: SpacecraftState,
+    positions: dict[str, Vec3],
+    next_positions: dict[str, Vec3],
+    bodies: Sequence[CelestialBody],
+) -> bool:
+    """Detecta una cuerda que atraviesa una esfera pese a extremos exteriores."""
+    return any(
+        segment_min_distance_sq(
+            state.position_m,
+            next_state.position_m,
+            positions[body.id],
+            next_positions[body.id],
+        ) <= body.radius_m**2
+        for body in bodies
+    )
 
-Devuelve:
-    samples: muestras de la trayectoria.
-    events: eventos detectados.
-    status: estado final de la simulación.
-"""
+
 def integrate(
     config: SimulationConfig,
     scenario: Scenario,
-) -> tuple[
-    list[TrajectorySample],
-    list[Event],
-    SimulationStatus,
-]:
-    if (
-        not math.isfinite(config.duration_s)
-        or config.duration_s < 0
-    ):
+) -> tuple[list[TrajectorySample], list[Event], SimulationStatus]:
+    """Propaga la trayectoria y detiene la simulacion al primer impacto.
+
+    Garantias del contrato v1:
+    - primera muestra t=0; tiempos estrictamente crecientes;
+    - cada muestra contiene posiciones planetarias para SU tiempo;
+    - ultimo paso acaba exactamente en duration_s si no hay impacto;
+    - ultimo punto en impacto + Event(type='collision') + status COLLISION;
+    - errores numericos nunca agregan muestras invalidas.
+    """
+    if not math.isfinite(config.duration_s) or config.duration_s <= 0:
         raise ValueError("Invalid simulation duration")
-
-    if (
-        not math.isfinite(config.step_s)
-        or config.step_s <= 0
-    ):
+    if not math.isfinite(config.step_s) or config.step_s <= 0:
         raise ValueError("Invalid integration step")
+    if not _valid_state(config.initial_state):
+        raise ValueError("Invalid initial state")
 
-    bodies = scenario.get_bodies()
+    bodies = list(scenario.get_bodies())
+    ids = [body.id for body in bodies]
+    if len(set(ids)) != len(ids):
+        raise ValueError("Duplicate celestial body identifiers")
+    if not bodies:
+        raise ValueError("Scenario has no celestial bodies")
 
-    body_ids = [body.id for body in bodies]
-
-    if len(body_ids) != len(set(body_ids)):
-        raise ValueError("Duplicate body identifiers")
-
-    samples: list[TrajectorySample] = []
-    events: list[Event] = []
-
-    # Estado inicial.
     t_s = 0.0
     state = config.initial_state
-
+    # Sin efemérides válidas ni siquiera la muestra inicial es fiable.
     try:
-        body_positions_m = _body_positions_at(
-            scenario,
-            t_s,
-        )
+        positions = _body_positions_at(scenario, t_s, bodies)
+    except (GravityError, ArithmeticError, ValueError, OverflowError):
+        return [], [], SimulationStatus.NUMERICAL_ERROR
 
-        # Primera muestra obligatoria.
-        samples.append(
-            TrajectorySample(
-                t_s=t_s,
-                spacecraft=state,
-                body_positions_m=body_positions_m,
-            )
-        )
+    samples = [TrajectorySample(t_s=t_s, spacecraft=state, body_positions_m=positions)]
+    events: list[Event] = []
 
-        # Comprobar colisión inicial.
-        collided_body = find_colliding_body(
-            state,
-            body_positions_m,
-            bodies,
-        )
+    collided = find_colliding_body(state, positions, bodies)
+    if collided is not None:
+        events.append(Event(type="collision", t_s=t_s, body_id=collided.id,
+                            position_m=state.position_m))
+        return samples, events, SimulationStatus.COLLISION
 
-        if collided_body is not None:
-            events.append(
-                Event(
-                    type="collision",
-                    t_s=t_s,
-                    body_id=collided_body.id,
-                    position_m=state.position_m,
-                )
-            )
-
-            return (
-                samples,
-                events,
-                SimulationStatus.COLLISION,
-            )
-
-    except (GravityError, ArithmeticError, ValueError):
-        return (
-            samples,
-            events,
-            SimulationStatus.NUMERICAL_ERROR,
-        )
-
-    # Bucle principal de integración.
     while t_s < config.duration_s:
-
         remaining_s = config.duration_s - t_s
-        step_s = min(config.step_s, remaining_s)
-
-        next_t_s = min(
-            config.duration_s,
-            t_s + step_s,
-        )
-
-        if next_t_s <= t_s:
-            return (
-                samples,
-                events,
-                SimulationStatus.NUMERICAL_ERROR,
-            )
-
-        actual_step_s = next_t_s - t_s
-
+        dt = min(config.step_s, remaining_s)
         try:
-            # Calcular el siguiente estado mediante RK2.
-            next_state = rk2_step(
-                t_s,
-                state,
-                actual_step_s,
-                scenario,
-            )
+            dt = _safe_step_s(t_s, state, dt, positions, bodies, scenario)
+        except (GravityError, ValueError, ArithmeticError, OverflowError):
+            return samples, events, SimulationStatus.NUMERICAL_ERROR
+        if not math.isfinite(dt) or dt <= 0 or t_s + dt == t_s:
+            return samples, events, SimulationStatus.NUMERICAL_ERROR
 
-            next_positions_m = _body_positions_at(
-                scenario,
-                next_t_s,
-            )
+        accepted = False
+        # El usuario puede pedir pasos inferiores a 1 microsegundo; el limite
+        # solo frena subdivisiones patologicas durante reintentos.
+        retry_floor_s = min(_MIN_STEP_S, config.step_s, remaining_s)
+        for _ in range(_MAX_STEP_RETRIES):
+            if dt < retry_floor_s or t_s + dt == t_s:
+                break
+            end_t_s = config.duration_s if dt == remaining_s else t_s + dt
+            # Reducir al avance representable para evitar diferencias de redondeo.
+            dt = end_t_s - t_s
+            if dt <= 0:
+                break
+            try:
+                next_state = rk2_step(t_s, state, dt, scenario)
+                next_positions = _body_positions_at(scenario, end_t_s, bodies)
+                collided = find_colliding_body(next_state, next_positions, bodies)
 
-            # Buscar colisiones dentro de todo el intervalo,
-            # no solo en el instante final.
-            collision = _locate_collision(
-                t0=t_s,
-                state0=state,
-                t1=next_t_s,
-                state1=next_state,
-                start_positions_m=body_positions_m,
-                end_positions_m=next_positions_m,
-                scenario=scenario,
-                bodies=bodies,
-            )
+                # Si el extremo esta dentro, biseccion desde el estado exterior.
+                if collided is not None:
+                    hit_t_s, hit_state, hit_positions = _refine_collision(
+                        t_s, state, dt, next_state, collided, bodies, scenario
+                    )
+                    if hit_t_s <= t_s:
+                        return samples, events, SimulationStatus.NUMERICAL_ERROR
+                    samples.append(TrajectorySample(
+                        t_s=hit_t_s,
+                        spacecraft=hit_state,
+                        body_positions_m=hit_positions,
+                    ))
+                    events.append(Event(
+                        type="collision",
+                        t_s=hit_t_s,
+                        body_id=collided.id,
+                        position_m=hit_state.position_m,
+                    ))
+                    return samples, events, SimulationStatus.COLLISION
 
-        except (GravityError, ArithmeticError, ValueError):
-            return (
-                samples,
-                events,
-                SimulationStatus.NUMERICAL_ERROR,
-            )
+                # Una nave puede ENTRAR y SALIR del cuerpo dentro del paso.
+                # Si la cuerda lo cruza, repetir el calculo con medio paso.
+                if _maybe_hidden_collision(state, next_state, positions, next_positions, bodies):
+                    dt *= 0.5
+                    continue
 
-        if collision is not None:
-
-            impact_time, impact_state, impact_positions, body = collision
-
-            samples.append(
-                TrajectorySample(
-                    t_s=impact_time,
-                    spacecraft=impact_state,
-                    body_positions_m=impact_positions,
+                # Inspeccion adicional del punto medio cerca de cualquier esfera:
+                # protege contra pasos curvos que el segmento lineal no captura.
+                near_body = any(
+                    segment_min_distance_sq(
+                        state.position_m, next_state.position_m,
+                        positions[body.id], next_positions[body.id],
+                    ) <= (3.0 * body.radius_m)**2
+                    for body in bodies
                 )
-            )
+                if near_body:
+                    half_state = rk2_step(t_s, state, 0.5 * dt, scenario)
+                    half_t_s = t_s + 0.5 * dt
+                    half_positions = _body_positions_at(scenario, half_t_s, bodies)
+                    half_collided = find_colliding_body(half_state, half_positions, bodies)
+                    if half_collided is not None:
+                        hit_t_s, hit_state, hit_positions = _refine_collision(
+                            t_s, state, 0.5 * dt, half_state,
+                            half_collided, bodies, scenario
+                        )
+                        if hit_t_s <= t_s:
+                            return samples, events, SimulationStatus.NUMERICAL_ERROR
+                        samples.append(TrajectorySample(
+                            t_s=hit_t_s, spacecraft=hit_state,
+                            body_positions_m=hit_positions,
+                        ))
+                        events.append(Event(
+                            type="collision", t_s=hit_t_s,
+                            body_id=half_collided.id, position_m=hit_state.position_m,
+                        ))
+                        return samples, events, SimulationStatus.COLLISION
 
-            events.append(
-                Event(
-                    type="collision",
-                    t_s=impact_time,
-                    body_id=body.id,
-                    position_m=impact_state.position_m,
-                )
-            )
+                samples.append(TrajectorySample(
+                    t_s=end_t_s, spacecraft=next_state,
+                    body_positions_m=next_positions,
+                ))
+                state = next_state
+                positions = next_positions
+                t_s = end_t_s
+                accepted = True
+                break
 
-            return (
-                samples,
-                events,
-                SimulationStatus.COLLISION,
-            )
+            except (GravityError, ArithmeticError, ValueError, OverflowError):
+                # Un punto medio dentro de un cuerpo no puede evaluarse. Con un
+                # paso menor, normalmente encontramos el impacto en el extremo.
+                dt *= 0.5
 
-        # No hay impacto: aceptar el paso y guardar la muestra.
-        samples.append(
-            TrajectorySample(
-                t_s=next_t_s,
-                spacecraft=next_state,
-                body_positions_m=next_positions_m,
-            )
-        )
+        if not accepted:
+            return samples, events, SimulationStatus.NUMERICAL_ERROR
 
-        state = next_state
-        t_s = next_t_s
-        body_positions_m = next_positions_m
-
-    return (
-        samples,
-        events,
-        SimulationStatus.COMPLETED,
-    )
+    return samples, events, SimulationStatus.COMPLETED
