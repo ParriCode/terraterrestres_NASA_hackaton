@@ -1438,3 +1438,145 @@
         font-size: 11px
     }
 }
+
+/* P4 · panel temporal solo para misiones seleccionadas; sin misión, CTA en esquina baja. */
+.first-mission-button {
+    bottom: 65px
+}
+
+.playback-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 9px
+}
+
+.playback-close {
+    width: 28px;
+    height: 28px;
+    flex: none;
+    border: 1px solid #35506a;
+    border-radius: 7px;
+    background: #17283d;
+    color: #a8c3dc;
+    display: grid;
+    place-items: center
+}
+
+.playback-close:hover {
+    border-color: #68cfc5;
+    color: #e6fff9
+}
+
+.journey-subtype {
+    font-size: 10px;
+    color: #9ac4ce;
+    margin: -4px 0 11px;
+    padding-left: 2px
+}
+
+.mission-route-caption {
+    margin: 0 0 13px;
+    color: #99b6d1;
+    font-size: 10px;
+    line-height: 1.5
+}
+
+.form-section-title {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .4px;
+    color: #acd1e6;
+    margin: 1px 0 10px
+}
+
+.route-choices {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 11px;
+    margin: 0 0 17px
+}
+
+.route-choice {
+    cursor: pointer;
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    min-height: 75px;
+    padding: 14px 11px;
+    background: #0b1a2c;
+    border: 1px solid #344c66;
+    border-radius: 11px;
+    transition: border-color .16s, background .16s
+}
+
+.route-choice.chosen {
+    background: #12323d;
+    border-color: #5bdbc9;
+    box-shadow: inset 0 0 0 1px #5bdbc922
+}
+
+.route-choice input {
+    accent-color: #68e2ce;
+    margin-top: 3px;
+    flex: none
+}
+
+.route-choice-body {
+    display: grid;
+    gap: 5px
+}
+
+.route-choice-body strong {
+    font-size: 12px;
+    color: #ecf7ff
+}
+
+.route-choice-body small {
+    font-size: 10px;
+    line-height: 1.45;
+    color: #94b5ca
+}
+
+.route-explanation {
+    font-size: 11px;
+    line-height: 1.6;
+    color: #a6bbd3;
+    margin: 0 0 16px;
+    border-left: 2px solid #5adac7;
+    padding: 6px 11px;
+    background: #10263a
+}
+
+.field select {
+    width: 100%;
+    background: #0b1829;
+    border: 1px solid #304961;
+    border-radius: 9px;
+    outline: none;
+    height: 41px;
+    padding: 0 11px;
+    color: #e8f2ff;
+    font-size: 12px
+}
+
+.field select:focus {
+    border-color: #55d1cb
+}
+
+@media(max-width:600px) {
+    .route-choices {
+        grid-template-columns: 1fr
+    }
+
+    .route-choice {
+        min-height: 63px
+    }
+
+    .first-mission-button {
+        bottom: 55px
+    }
+
+    .playback-header-actions {
+        gap: 5px
+    }
+}

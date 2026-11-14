@@ -91,7 +91,8 @@ export default function App() {
     const color = COLORS[journeys.length % COLORS.length]
     const journey: Journey = {
       id: crypto.randomUUID(), name: data.name, color, visible: true, source,
-      launch_iso: data.launch_iso, result
+      launch_iso: data.launch_iso, route_kind: data.route_kind, optimization_goal: data.optimization_goal,
+      min_flyby_altitude_km: data.min_flyby_altitude_km, result
     }
     setJourneys(old => [...old, journey])
     setSelectedId(journey.id)
@@ -102,10 +103,16 @@ export default function App() {
     setFormOpen(false); setDrawerOpen(true); setError('')
   }
   function createDemo(data: NewJourneyForm) {
-    newJourney(data, 'demo', createDemoSimulation(data.config, journeys.length + 1))
+    newJourney(data, 'demo', createDemoSimulation(data.config, journeys.length + 1,
+      data.route_kind, data.min_flyby_altitude_km))
   }
   async function runBackend(data: NewJourneyForm) {
     if (busy) return
+    // El contrato FastAPI v1 sólo propaga estados; no dispone de búsqueda de retorno libre
+    if (data.route_kind === 'lunar_free_return') {
+      setError('El retorno libre lunar todavía no está implementado en FastAPI. Usa «Ver demo» o acuerda el contrato de búsqueda con Rafa.')
+      return
+    }
     setBusy(true); setError('')
     try { const result = await runSimulation(data.config); newJourney(data, 'backend', result) }
     catch (e) { setError(e instanceof Error ? e.message : 'Error desconocido al ejecutar la simulación.') }
@@ -124,6 +131,12 @@ export default function App() {
     if (timeMode === 'manual') setClock(new Date(new Date(journey.launch_iso).getTime() + Math.min(journey.result.diagnostics.final_time_s, journey.result.diagnostics.final_time_s * .3) * 1000))
     setPlaying(false)
     setFocusEarthSignal(s => s + 1)
+  }
+  function deselectJourney() {
+    setSelectedId(null)
+    setPlaying(false)
+    setTimeMode('live')
+    setClock(new Date())
   }
   function changeMode(mode: TimeMode) { setTimeMode(mode); setPlaying(false); if (mode === 'live') setClock(new Date()) }
   function resetTime() { if (!selected) return; setTimeMode('manual'); setPlaying(false); setClock(new Date(selected.launch_iso)) }
@@ -149,8 +162,8 @@ export default function App() {
       <div className={`map-overlay-shade ${drawerOpen ? 'shown' : ''}`} />
       <JourneyDrawer open={drawerOpen} journeys={journeys} selectedId={selectedId} date={clock} onClose={() => setDrawerOpen(false)} onNew={() => setFormOpen(true)} onSelect={selectJourney} onToggle={id => setJourneys(old => old.map(j => j.id === id ? { ...j, visible: !j.visible } : j))} onDelete={removeJourney} />
       {selected && <ResultsPanel journey={selected} />}
-      <div className="playback-position"><PlaybackControls date={clock} mode={timeMode} onMode={changeMode} journey={selected} playing={playing} onToggle={togglePlayback} speed={speed} onSpeed={setSpeed} onDate={d => { setTimeMode('manual'); setPlaying(false); setClock(d) }} onReset={resetTime} /></div>
-      {!selected && <button className="first-mission-button" onClick={() => setFormOpen(true)}><Icon name="rocket" size={18} />Comenzar una misión <Icon name="arrow-right" size={17} /></button>}
+      {selected && <div className="playback-position"><PlaybackControls date={clock} mode={timeMode} onMode={changeMode} journey={selected} playing={playing} onToggle={togglePlayback} speed={speed} onSpeed={setSpeed} onDate={d => { setTimeMode('manual'); setPlaying(false); setClock(d) }} onReset={resetTime} onDeselect={deselectJourney} /></div>}
+      {!selected && <button className="first-mission-button" onClick={() => journeys.length ? setDrawerOpen(true) : setFormOpen(true)}><Icon name="rocket" size={18} />{journeys.length ? 'Seleccionar una misión' : 'Comenzar una misión'} <Icon name="arrow-right" size={17} /></button>}
     </main>
     {error && <div role="alert" className="toast-error"><Icon name="alert" size={19} /><span>{error}</span><button onClick={() => setError('')} aria-label="Cerrar error"><Icon name="x" size={15} /></button></div>}
     <SimulationForm open={formOpen} busy={busy} onClose={() => setFormOpen(false)} onDemo={createDemo} onBackend={runBackend} />

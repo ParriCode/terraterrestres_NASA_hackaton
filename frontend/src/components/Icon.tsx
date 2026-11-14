@@ -1,7 +1,6 @@
 /**
- * Iconos oficiales de Font Awesome Free. No hay trazos SVG inventados.
- * Se conserva la interfaz <Icon name="..." /> para no tener que editar
- * todos los componentes que ya consumen este archivo.
+ * Iconos oficiales de Font Awesome Free. No hay trazos SVG inventados
+ * Se conserva la interfaz <Icon name="..." /> para no tener que editar todos los componentes que ya consumen este archivo
  */
 import type { CSSProperties } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'

@@ -17,6 +17,7 @@ export default function ResultsPanel({ journey }: Props) {
       <button onClick={() => setCollapsed(s => !s)} className="results-collapse" title={collapsed ? 'Mostrar resultados' : 'Ocultar resultados'}>{collapsed ? 'Mostrar' : 'Ocultar'}</button></header>
     {!collapsed && <div className="results-body">
       <div className="result-status"><span className={journey.source === 'demo' ? 'status-demo' : collision || numerical ? 'status-warn' : 'status-okay'}><span className="small-dot" />{status}</span></div>
+      <p className="mission-route-caption">{journey.route_kind === 'lunar_free_return' ? 'Tierra → sobrevuelo lunar → Tierra' : 'Tierra → Luna'} · {journey.optimization_goal === 'fuel' ? 'Prioridad: combustible' : journey.optimization_goal === 'time' ? 'Prioridad: duración' : journey.optimization_goal === 'safety' ? 'Prioridad: margen' : 'Sin prioridad de búsqueda'}</p>
       <div className="result-grid">
         <div><span>Tiempo final</span><strong>{formatDuration(d.final_time_s)}</strong></div>
         <div><span>Pasos completados</span><strong>{d.steps_completed.toLocaleString('es-ES')}</strong></div>
