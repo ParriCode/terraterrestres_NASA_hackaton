@@ -6,7 +6,7 @@ from scipy.integrate import solve_ivp
 from app.physics.gravity import gravitational_acceleration
 
 
-def propagate_planar(scenario, position_m, velocity_m_s, t0, t1, *, events=False):
+def propagate_planar(scenario, position_m, velocity_m_s, t0, t1, *, events=False, budget_check=None):
     """DOP853 con salida densa. Durante shooting se desactivan los eventos.
 
     Los eventos registran cruces entrantes; la holgura terrestre de 1 m permite
@@ -14,7 +14,13 @@ def propagate_planar(scenario, position_m, velocity_m_s, t0, t1, *, events=False
     """
     bodies = scenario.get_bodies()
 
+    calls = 0
+
     def derivative(t, state):
+        nonlocal calls
+        calls += 1
+        if budget_check is not None and calls % 32 == 1:
+            budget_check()
         positions = {body.id: body.pos(t) for body in bodies}
         a = gravitational_acceleration(
             (float(state[0]), float(state[1]), 0.0), positions, bodies,

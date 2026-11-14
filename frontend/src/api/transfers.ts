@@ -41,6 +41,14 @@ function isTransferResponse(value: unknown): value is TransferResponse {
     && isVec3(r.initial_velocity_m_s) && isNum(r.launch_speed_m_s) && isNum(r.launch_energy_j)
     && isNum(r.path_length_m) && isNum(r.arrival_error_m) && isNum(r.duration_s) && isNum(r.arrival_angle_deg)
     && isNum(r.bodies?.earth?.radius_m) && isNum(r.bodies?.moon?.radius_m)
+    && (r.optimization === undefined || (r.optimization.method === 'bounded_angle_search'
+      && Array.isArray(r.optimization.attempted_angles_deg)
+      && r.optimization.attempted_angles_deg.every(isNum)
+      && isNum(r.optimization.valid_candidates)
+      && Array.isArray(r.optimization.timed_out_angles_deg)
+      && r.optimization.timed_out_angles_deg.every(isNum)
+      && typeof r.optimization.search_complete === 'boolean'
+      && r.optimization.global_optimum_guaranteed === false))
     && Array.isArray(s) && s.length >= 2 && s[0].t_s === 0
     && s.every((p, i) => isNum(p.t_s) && (i === 0 || p.t_s > s[i - 1].t_s)
       && isVec3(p.position_m) && isVec3(p.velocity_m_s)
@@ -64,7 +72,7 @@ export async function requestTransfer(body: TransferRequest, signal?: AbortSigna
   const data: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     const detail = describeDetail((data as { detail?: unknown } | null)?.detail) || response.statusText
-    if (response.status === 404 || response.status === 405) throw new ApiError(response.status, "Rafa debe habilitar POST /transfers/optimize para buscar el ángulo de llegada. El endpoint /transfers actual sólo calcula con un ángulo fijo; no se usará 0° como supuesto óptimo.")
+    if (response.status === 404 || response.status === 405) throw new ApiError(response.status, "POST /transfers/optimize no está disponible. Comprueba que has aplicado la actualización del backend y reiniciado FastAPI.")
     if (response.status === 422) throw new ApiError(422, `No se pudo calcular la transferencia: ${detail}`)
     if (response.status === 502) throw new ApiError(502, `Fallo al consultar las efemérides de NASA/JPL Horizons: ${detail}`)
     throw new ApiError(response.status, `Error del backend (HTTP ${response.status}): ${detail}`)

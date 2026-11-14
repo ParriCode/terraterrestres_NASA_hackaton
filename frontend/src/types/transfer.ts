@@ -20,6 +20,15 @@ export type TransferSample = {
 
 export type TransferBody = { name: string; radius_m: number }
 
+export type TransferOptimization = {
+  method: 'bounded_angle_search'
+  attempted_angles_deg: number[]
+  valid_candidates: number
+  search_complete: boolean
+  timed_out_angles_deg: number[]
+  global_optimum_guaranteed: false
+}
+
 export type TransferResponse = {
   source: string
   date: string
@@ -31,6 +40,7 @@ export type TransferResponse = {
   launch_speed_m_s: number
   launch_energy_j: number
   arrival_angle_deg: number // ángulo que eligió el optimizador de /transfers/optimize
+  optimization?: TransferOptimization
   path_length_m: number
   arrival_error_m: number
   duration_s: number

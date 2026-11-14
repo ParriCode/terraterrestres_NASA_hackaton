@@ -5,6 +5,8 @@ del escenario, origen baricéntrico y z=0. Se ignoran rotación y otras gravedad
 """
 from dataclasses import dataclass, field
 from datetime import datetime
+import time
+from typing import Callable
 
 import numpy as np
 
@@ -65,7 +67,8 @@ class TransferResult:
 
 
 def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
-      scenario: PlanarScenario, mass_kg=1.0, arrival_tolerance_m=1000.0) -> TransferResult:
+      scenario: PlanarScenario, mass_kg=1.0, arrival_tolerance_m=1000.0,
+      max_shooting_evaluations=200, budget_check: Callable[[], None] | None = None) -> TransferResult:
     """Busca la mejor candidata válida entre semillas Lambert pro/retrógradas.
 
     Replica F del documento, sin garantía de óptimo global. La energía de
@@ -93,7 +96,9 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
     valid, reasons = [], []
 
     def residual(velocity):
-        solution = propagate_planar(scenario, x0, velocity, t0, t1)
+        if budget_check is not None:
+            budget_check()
+        solution = propagate_planar(scenario, x0, velocity, t0, t1, budget_check=budget_check)
         final = solution.y[:2, -1] - target[:2]
         return float(final[0]), float(final[1]), 0.0
 
@@ -102,6 +107,8 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
             break
         for prograde in (True, False):
             for factor in factors:
+                if budget_check is not None:
+                    budget_check()
                 try:
                     seed = solve_lambert(
                         tuple(start - earth.pos(t0)), tuple(target - earth.pos(t1)),
@@ -110,7 +117,7 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
                     guess = tuple(np.asarray(seed.departure_velocity_m_s) + earth_velocity)
                     shot = solve_shooting(guess, residual, planar=True,
                                           arrival_tolerance_m=arrival_tolerance_m,
-                                          max_evaluations=200)
+                                          max_evaluations=max_shooting_evaluations)
                     if not shot.converged:
                         reasons.append(f"Error de llegada: {shot.residual_norm_m:.1f} m")
                         continue
@@ -120,7 +127,7 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
                         continue
                     if any(np.linalg.norm(velocity - r.initial_velocity_m_s) < 1 for r in valid):
                         continue
-                    solution = propagate_planar(scenario, x0, velocity, t0, t1, events=True)
+                    solution = propagate_planar(scenario, x0, velocity, t0, t1, events=True, budget_check=budget_check)
                     earth_index = list(scenario.bodies).index("earth")
                     moon_index = list(scenario.bodies).index("moon")
                     if len(solution.t_events[earth_index]):
@@ -175,3 +182,138 @@ def design_transfer(date: datetime, duration_s: float, *, launch_angle_deg=90.0,
     return F(surface(earth, moon, 0, launch_angle_deg),
              surface(moon, earth, duration_s, arrival_angle_deg),
              0.0, duration_s, objective, scenario=scenario, mass_kg=mass_kg)
+
+
+@dataclass(frozen=True)
+class OptimizedTransfer:
+    """Mejor candidata *evaluada* en una búsqueda angular finita."""
+
+    transfer: TransferResult
+    arrival_angle_deg: float
+    attempted_angles_deg: tuple[float, ...]
+    valid_candidates: int
+    search_complete: bool
+    timed_out_angles_deg: tuple[float, ...]
+
+
+def optimize_transfer(
+    date: datetime,
+    duration_s: float,
+    *,
+    launch_angle_deg: float = 90.0,
+    objective: str = "energia",
+    mass_kg: float = 1.0,
+    spacing_s: float = 3600.0,
+    time_budget_s: float = 100.0,
+    coarse_step_deg: int = 45,
+    max_shooting_evaluations: int = 75,
+) -> OptimizedTransfer:
+    """Busca un ángulo de llegada sin asumir que 0° sea el óptimo.
+
+    Misma fecha/duración y efemérides para todos los candidatos. En primer
+    lugar se evalúa una rejilla circular de ángulos; después se prueban dos
+    vecinos del mejor resultado. Se rechazan impactos y fallos de llegada por
+    las validaciones existentes de F. El tiempo y la malla son acotados.
+
+    Es el mejor candidato *encontrado*, no un óptimo continuo o global.
+    """
+    validate_positive(mass_kg, "mass_kg")
+    validate_positive(time_budget_s, "time_budget_s")
+    validate_positive(duration_s, "duration_s")
+    if objective not in ("energia", "distancia"):
+        raise ValueError("objective debe ser energia o distancia.")
+    if not np.isfinite(launch_angle_deg):
+        raise ValueError("launch_angle_deg debe ser finito.")
+    if not isinstance(coarse_step_deg, int) or isinstance(coarse_step_deg, bool) or coarse_step_deg <= 0 or 360 % coarse_step_deg:
+        raise ValueError("coarse_step_deg debe dividir 360 exactamente.")
+    if not isinstance(max_shooting_evaluations, int) or max_shooting_evaluations < 3:
+        raise ValueError("max_shooting_evaluations debe ser >= 3.")
+
+    # Sólo una descarga / proyección de efemérides por petición.
+    scenario = PlanarScenario(date, duration_s, spacing_s=spacing_s)
+    earth, moon = scenario.bodies["earth"], scenario.bodies["moon"]
+
+    def surface(body, other, t, angle):
+        center = np.asarray(body.pos(t))
+        vector = np.asarray(other.pos(t)) - center
+        theta = np.arctan2(vector[1], vector[0]) + np.deg2rad(angle)
+        return tuple(center + body.radius_m * np.array((np.cos(theta), np.sin(theta), 0.0)))
+
+    start = surface(earth, moon, 0.0, launch_angle_deg)
+    best: TransferResult | None = None
+    best_angle: float | None = None
+    attempted: list[float] = []
+    valid_count = 0
+    complete = True
+    expires = time.monotonic() + time_budget_s
+    skipped_slow: list[float] = []
+
+    class SlowCandidate(TimeoutError):
+        pass
+
+    def ensure_time_left():
+        if time.monotonic() >= expires:
+            raise TimeoutError("Se agotó el presupuesto de búsqueda angular.")
+
+    def normalized(degrees: float) -> float:
+        angle = (degrees + 180.0) % 360.0 - 180.0
+        return 0.0 if angle == 0.0 else float(angle)
+
+    def attempt(angle: float):
+        nonlocal best, best_angle, valid_count, complete
+        angle = normalized(angle)
+        if angle in attempted:
+            return
+        ensure_time_left()
+        attempted.append(angle)
+        target = surface(moon, earth, duration_s, angle)
+        candidate_expires = min(expires, time.monotonic() + 13.0)
+
+        def check_candidate_budget():
+            ensure_time_left()
+            if time.monotonic() >= candidate_expires:
+                raise SlowCandidate("Geometría descartada por superar el tiempo permitido.")
+
+        try:
+            result = F(
+                start, target, 0.0, duration_s, objective,
+                scenario=scenario, mass_kg=mass_kg,
+                max_shooting_evaluations=max_shooting_evaluations,
+                budget_check=check_candidate_budget,
+            )
+        except TransferNotFoundError:
+            return
+        except SlowCandidate:
+            skipped_slow.append(angle)
+            complete = False
+            return
+        except TimeoutError:
+            complete = False
+            raise
+        valid_count += 1
+        key = (lambda r: r.launch_energy_j) if objective == "energia" else (lambda r: r.path_length_m)
+        if best is None or key(result) < key(best):
+            best, best_angle = result, angle
+
+    # Rejilla simétrica que incluye 0° como candidato, sin privilegiarlo.
+    try:
+        # Primero se prueban ángulos próximos a la orientación nominal;
+        # el resto de la circunferencia se explora si queda presupuesto.
+        angles = sorted(range(-180, 180, coarse_step_deg), key=lambda a: (abs(a), a))
+        for angle in angles:
+            attempt(float(angle))
+        if best_angle is not None:
+            for offset in (-coarse_step_deg / 3.0, coarse_step_deg / 3.0):
+                attempt(best_angle + offset)
+    except TimeoutError:
+        pass
+
+    if best is None or best_angle is None:
+        suffix = " (tiempo agotado)" if not complete else ""
+        raise TransferNotFoundError(
+            f"No se encontró una transferencia Tierra–Luna válida para la fecha y duración "
+            f"indicadas, tras evaluar {len(attempted)} ángulos{suffix}."
+        )
+    return OptimizedTransfer(
+        best, best_angle, tuple(attempted), valid_count, complete, tuple(skipped_slow),
+    )

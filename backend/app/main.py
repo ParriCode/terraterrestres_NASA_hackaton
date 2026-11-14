@@ -54,7 +54,7 @@ def create_app(
     @app.middleware("http")
     async def identify_simulation_mode(request: Request, call_next):
         response = await call_next(request)
-        effective_mode = "real" if request.url.path.rstrip("/") == "/transfers" else mode
+        effective_mode = "real" if request.url.path.rstrip("/") in {"/transfers", "/transfers/optimize"} else mode
         response.headers["X-Simulation-Mode"] = effective_mode
         if effective_mode == "mock":
             response.headers["X-Simulation-Warning"] = MOCK_WARNING
