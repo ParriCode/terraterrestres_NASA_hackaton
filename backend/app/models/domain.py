@@ -152,9 +152,9 @@ class TrajectorySample:
         if not self.body_positions_m:
             raise ValueError("'body_positions_m' must contain the positions of the bodies.")
         for body_id, pos in self.body_positions_m.items():
-            if not body_id:
-                raise ValueError("The keys of 'body_positions_m' cannot be empty.")
+            validate_non_empty_str(body_id, "body_positions_m key")
             validate_vec3(pos, f"body_positions_m['{body_id}']")
+
 
 
 # Registro de incidentes
