@@ -1,4 +1,5 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 .venv/
 =======
 # Entornos virtuales
@@ -31,3 +32,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 >>>>>>> 6e36787 (Gitignore)
+=======
+.venv/
+>>>>>>> 3430d62 (feature: Add .gitignore)
