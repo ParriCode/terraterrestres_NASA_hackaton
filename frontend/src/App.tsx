@@ -114,7 +114,11 @@ export default function App() {
       return
     }
     setBusy(true); setError('')
-    try { const result = await runSimulation(data.config); newJourney(data, 'backend', result) }
+    try {
+      const result = await runSimulation(data.config)
+      const source = result.config.scenario_id === 'mock_earth_moon_v1' ? 'demo' : 'backend'
+      newJourney({ ...data, launch_iso: result.config.date }, source, result)
+    }
     catch (e) { setError(e instanceof Error ? e.message : 'Error desconocido al ejecutar la simulación.') }
     finally { setBusy(false) }
   }

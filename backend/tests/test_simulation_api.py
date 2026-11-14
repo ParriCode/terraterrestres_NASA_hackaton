@@ -70,7 +70,7 @@ class SimulationApiTests(unittest.TestCase):
         self.assertTrue(response.json()["config"]["scenario_id"].startswith("mock_"))
         for body in response.json()["bodies"]:
             self.assertIn("ficticios", body["name"])
-            self.assertGreater(body["mass"], 0)
+            self.assertNotIn("mass", body)
 
     def test_mock_motion_and_diagnostics_match_saved_samples(self):
         result = self.post().json()
@@ -236,7 +236,7 @@ class SimulationApiTests(unittest.TestCase):
     def test_invalid_engine_output_is_a_server_error(self):
         def invalid_output(config):
             result = run_simulation(config, components=build_mock_components())
-            result.bodies[0] = replace(result.bodies[0], mass=-1)
+            result.units["length"] = "km"
             return result
         self.override_runner(invalid_output)
         with self.assertLogs(LOGGER, level="ERROR"):
@@ -295,7 +295,8 @@ class SimulationApiTests(unittest.TestCase):
         operation = schema["paths"]["/simulations"]["post"]
         self.assertIn("ficticios", operation["summary"])
         self.assertIn("X-Simulation-Mode", operation["responses"]["200"]["headers"])
-        self.assertIn("mass", schema["components"]["schemas"]["CelestialBodySchema"]["required"])
+        self.assertNotIn("mass", schema["components"]["schemas"]["CelestialBodySchema"]["properties"])
+        self.assertIn("date", schema["components"]["schemas"]["SimulationConfigSchema"]["required"])
 
     def test_invalid_example_file_returns_422(self):
         payload = json.loads((EXAMPLES / "request.invalid.json").read_text())
@@ -307,6 +308,27 @@ class SimulationApiTests(unittest.TestCase):
         other["initial_state"]["position_m"][0] += 1000
         self.assertEqual(self.post(other).status_code, 200)
         self.assertEqual(self.post().json(), first)
+
+    def test_date_is_required_and_must_have_timezone(self):
+        for value in (None, "2026-11-14T12:00:00", "invalid", 12345, True):
+            with self.subTest(value=value):
+                payload = {**self.payload, "date": value}
+                self.assertEqual(self.post(payload).status_code, 422)
+        payload = dict(self.payload)
+        del payload["date"]
+        self.assertEqual(self.post(payload).status_code, 422)
+
+    def test_date_is_normalized_and_preserved_in_domain(self):
+        captured = []
+        def runner(config):
+            captured.append(config.date)
+            return run_simulation(config, components=build_mock_components())
+        self.override_runner(runner)
+        response = self.post({**self.payload, "date": "2026-11-14T13:00:00+01:00"})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["config"]["date"], "2026-11-14T12:00:00Z")
+        self.assertEqual(captured[0].isoformat(), "2026-11-14T12:00:00+00:00")
+        self.assertNotIn("masa", response.json()["units"])
 
 
 if __name__ == "__main__":

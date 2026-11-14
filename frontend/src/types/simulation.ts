@@ -14,6 +14,7 @@ export interface SpacecraftState {
   velocity_m_s: Vec3
 }
 export interface SimulationConfig {
+  date: string // ISO 8601 con zona horaria; enviado en UTC.
   scenario_id: string
   initial_state: SpacecraftState
   duration_s: number
