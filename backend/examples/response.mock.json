@@ -1,0 +1,249 @@
+{
+  "schema_version": "1.0",
+  "config": {
+    "scenario_id": "mock_earth_moon_v1",
+    "initial_state": {
+      "position_m": [
+        2000000.0,
+        0.0,
+        0.0
+      ],
+      "velocity_m_s": [
+        0.0,
+        7500.0,
+        0.0
+      ]
+    },
+    "duration_s": 60.0,
+    "step_s": 10.0
+  },
+  "frame": "earth_moon_barycentric_inertial",
+  "units": {
+    "length": "m",
+    "time": "s",
+    "velocity": "m/s",
+    "gravitational_parameter": "m^3/s^2",
+    "masa": "kg"
+  },
+  "bodies": [
+    {
+      "id": "earth",
+      "name": "Tierra (datos ficticios)",
+      "mu_m3_s2": 400000000000000.0,
+      "radius_m": 6400000.0,
+      "mass": 6e+24
+    },
+    {
+      "id": "moon",
+      "name": "Luna (datos ficticios)",
+      "mu_m3_s2": 5000000000000.0,
+      "radius_m": 1700000.0,
+      "mass": 7.5e+22
+    }
+  ],
+  "status": "completed",
+  "samples": [
+    {
+      "t_s": 0.0,
+      "spacecraft": {
+        "position_m": [
+          2000000.0,
+          0.0,
+          0.0
+        ],
+        "velocity_m_s": [
+          0.0,
+          7500.0,
+          0.0
+        ]
+      },
+      "body_positions_m": {
+        "earth": [
+          -4691358.024691358,
+          0.0,
+          0.0
+        ],
+        "moon": [
+          375308641.9753086,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "t_s": 10.0,
+      "spacecraft": {
+        "position_m": [
+          2000000.0,
+          75000.0,
+          0.0
+        ],
+        "velocity_m_s": [
+          0.0,
+          7500.0,
+          0.0
+        ]
+      },
+      "body_positions_m": {
+        "earth": [
+          -4691358.024691358,
+          0.0,
+          0.0
+        ],
+        "moon": [
+          375308641.9753086,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "t_s": 20.0,
+      "spacecraft": {
+        "position_m": [
+          2000000.0,
+          150000.0,
+          0.0
+        ],
+        "velocity_m_s": [
+          0.0,
+          7500.0,
+          0.0
+        ]
+      },
+      "body_positions_m": {
+        "earth": [
+          -4691358.024691358,
+          0.0,
+          0.0
+        ],
+        "moon": [
+          375308641.9753086,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "t_s": 30.0,
+      "spacecraft": {
+        "position_m": [
+          2000000.0,
+          225000.0,
+          0.0
+        ],
+        "velocity_m_s": [
+          0.0,
+          7500.0,
+          0.0
+        ]
+      },
+      "body_positions_m": {
+        "earth": [
+          -4691358.024691358,
+          0.0,
+          0.0
+        ],
+        "moon": [
+          375308641.9753086,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "t_s": 40.0,
+      "spacecraft": {
+        "position_m": [
+          2000000.0,
+          300000.0,
+          0.0
+        ],
+        "velocity_m_s": [
+          0.0,
+          7500.0,
+          0.0
+        ]
+      },
+      "body_positions_m": {
+        "earth": [
+          -4691358.024691358,
+          0.0,
+          0.0
+        ],
+        "moon": [
+          375308641.9753086,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "t_s": 50.0,
+      "spacecraft": {
+        "position_m": [
+          2000000.0,
+          375000.0,
+          0.0
+        ],
+        "velocity_m_s": [
+          0.0,
+          7500.0,
+          0.0
+        ]
+      },
+      "body_positions_m": {
+        "earth": [
+          -4691358.024691358,
+          0.0,
+          0.0
+        ],
+        "moon": [
+          375308641.9753086,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "t_s": 60.0,
+      "spacecraft": {
+        "position_m": [
+          2000000.0,
+          450000.0,
+          0.0
+        ],
+        "velocity_m_s": [
+          0.0,
+          7500.0,
+          0.0
+        ]
+      },
+      "body_positions_m": {
+        "earth": [
+          -4691358.024691358,
+          0.0,
+          0.0
+        ],
+        "moon": [
+          375308641.9753086,
+          0.0,
+          0.0
+        ]
+      }
+    }
+  ],
+  "events": [],
+  "diagnostics": {
+    "final_time_s": 60.0,
+    "steps_completed": 6,
+    "min_distance_m": {
+      "earth": 6691358.024691358,
+      "moon": 373308641.9753086
+    },
+    "min_altitude_m": {
+      "earth": 291358.0246913582,
+      "moon": 371608641.9753086
+    }
+  }
+}

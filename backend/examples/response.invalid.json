@@ -1,0 +1,16 @@
+{
+  "detail": {
+    "code": "invalid_request",
+    "message": "Revisa los datos de la petición.",
+    "errors": [
+      {
+        "loc": [
+          "body",
+          "step_s"
+        ],
+        "type": "greater_than",
+        "msg": "Input should be greater than 0"
+      }
+    ]
+  }
+}
