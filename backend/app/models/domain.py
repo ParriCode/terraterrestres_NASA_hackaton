@@ -120,17 +120,17 @@ class Simulation:
 
 
     # Variable validations
-#    def __post_init__(self) -> None:
-#        if not self.name or not self.name.strip():
-#            raise ValueError("The 'name' cannot be empty.")
-#        if not isinstance(self.origin_body, CelestialBody):
-#            raise TypeError("'origin_body' must be an instance of CelestialBody.")
-#        if not isinstance(self.destination_body, CelestialBody):
-#            raise TypeError("'destination_body' must be an instance of CelestialBody.")
-#        if self.origin_body.id == self.destination_body.id:
-#            raise ValueError("'origin_body' and 'destination_body' must be different bodies.")
-#        if not isinstance(self.date, datetime):
-#            raise TypeError("'date' must be a valid datetime instance.")
+    def __post_init__(self) -> None:
+        if not self.name or not self.name.strip():
+            raise ValueError("The 'name' cannot be empty.")
+        if not isinstance(self.origin_body, CelestialBody):
+            raise TypeError("'origin_body' must be an instance of CelestialBody.")
+        if not isinstance(self.destination_body, CelestialBody):
+            raise TypeError("'destination_body' must be an instance of CelestialBody.")
+        if self.origin_body.id == self.destination_body.id:
+            raise ValueError("'origin_body' and 'destination_body' must be different bodies.")
+        if not isinstance(self.date, datetime):
+            raise TypeError("'date' must be a valid datetime instance.")
 
 
 # Une en un tiempo el estado de la nave y las posiciones de los cuerpos
