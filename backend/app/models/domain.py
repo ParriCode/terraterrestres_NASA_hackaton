@@ -114,7 +114,7 @@ class SimulationConfig:
 
 
 
-@dataclass(frozen=True)
+#@dataclass(frozen=True)
 class Simulation:
     name: str
     origin_body: CelestialBody
@@ -135,8 +135,23 @@ class Simulation:
             raise TypeError("'date' must be a valid datetime instance.")
 
 
+# Une en un tiempo el estado de la nave y las posiciones de los cuerpos
+@dataclass(frozen=True)
+class TrajectorySample:
+    t_s: float
+    spacecraft: SpacecraftState
+    body_positions_m: dict[str, Vec3]
 
-
+    # Variable validations
+    def __post_init__(self) -> None:
+        validate_non_negative(self.t_s, "t_s")
+        if not isinstance(self.spacecraft, SpacecraftState):
+            raise TypeError("'spacecraft' must be an instance of SpacecraftState.")
+        if not self.body_positions_m:
+            raise ValueError("'body_positions_m' must contain the positions of the bodies.")
+        for body_id, pos in self.body_positions_m.items():
+            validate_non_empty_str(body_id, "body_positions_m key")
+            validate_vec3(pos, f"body_positions_m['{body_id}']")
 
 
 # Registro de incidentes
