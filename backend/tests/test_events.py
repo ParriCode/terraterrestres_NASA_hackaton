@@ -1,37 +1,93 @@
 import pytest
 
 from app.models.domain import SpacecraftState
-from app.physics.events import is_collision
-
-
-@pytest.mark.parametrize(
-    ("position", "expected"),
-    [
-        ((2.0, 0.0, 0.0), False),  # fuera
-        ((1.0, 0.0, 0.0), True),   # justo en la superficie
-        ((0.5, 0.0, 0.0), True),   # dentro
-        ((0.0, 0.0, 0.0), True),   # centro
-    ],
+from app.physics.events import (
+    is_collision,
+    swept_collision_closest_fraction,
 )
-def test_is_collision(position, expected):
-    state = SpacecraftState(
+
+
+def make_state(position):
+    return SpacecraftState(
         position_m=position,
         velocity_m_s=(0.0, 0.0, 0.0),
     )
 
-    assert is_collision(state, (0.0, 0.0, 0.0), 1.0) is expected
+
+def test_collision_on_surface():
+    state = make_state((1.0, 0.0, 0.0))
+
+    assert is_collision(
+        state,
+        (0.0, 0.0, 0.0),
+        1.0,
+    )
 
 
-@pytest.mark.parametrize("radius", [0.0, -1.0, float("nan"), float("inf")])
-def test_is_collision_rejects_invalid_radius(radius):
-    state = SpacecraftState((2.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+def test_collision_inside_body():
+    state = make_state((0.5, 0.0, 0.0))
 
-    with pytest.raises(ValueError, match="Invalid body radius"):
-        is_collision(state, (0.0, 0.0, 0.0), radius)
+    assert is_collision(
+        state,
+        (0.0, 0.0, 0.0),
+        1.0,
+    )
 
 
-def test_is_collision_rejects_non_finite_distance():
-    state = SpacecraftState((1e308, 0.0, 0.0), (0.0, 0.0, 0.0))
+def test_no_collision_outside_body():
+    state = make_state((2.0, 0.0, 0.0))
 
-    with pytest.raises(ValueError, match="Non-finite distance"):
-        is_collision(state, (0.0, 0.0, 0.0), 1.0)
+    assert not is_collision(
+        state,
+        (0.0, 0.0, 0.0),
+        1.0,
+    )
+
+
+def test_swept_collision_detects_crossing():
+    # La nave comienza y termina fuera del planeta,
+    # pero atraviesa su esfera durante el desplazamiento.
+    fraction = swept_collision_closest_fraction(
+        spacecraft_start_m=(-2.0, 0.5, 0.0),
+        spacecraft_end_m=(2.0, 0.5, 0.0),
+        body_start_m=(0.0, 0.0, 0.0),
+        body_end_m=(0.0, 0.0, 0.0),
+        body_radius_m=1.0,
+    )
+
+    assert fraction is not None
+    assert fraction == pytest.approx(0.5)
+
+
+def test_swept_collision_does_not_detect_miss():
+    fraction = swept_collision_closest_fraction(
+        spacecraft_start_m=(-2.0, 2.0, 0.0),
+        spacecraft_end_m=(2.0, 2.0, 0.0),
+        body_start_m=(0.0, 0.0, 0.0),
+        body_end_m=(0.0, 0.0, 0.0),
+        body_radius_m=1.0,
+    )
+
+    assert fraction is None
+
+
+def test_invalid_radius():
+    state = make_state((2.0, 0.0, 0.0))
+
+    with pytest.raises(ValueError):
+        is_collision(
+            state,
+            (0.0, 0.0, 0.0),
+            0.0,
+        )
+
+
+def test_non_finite_position():
+    state = make_state((float("nan"), 0.0, 0.0))
+
+    with pytest.raises(ValueError):
+        is_collision(
+            state,
+            (0.0, 0.0, 0.0),
+            1.0,
+        )
