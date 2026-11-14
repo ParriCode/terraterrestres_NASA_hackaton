@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from app.controllers.simulation_controller import router
 from app.controllers.transfer_controller import router as transfer_router
+from app.controllers.ephemeris_controller import router as ephemeris_router
 from app.models.domain import SCHEMA_VERSION
 from app.services.mock_simulation import MOCK_WARNING, build_mock_components
 from app.services.simulation_service import SimulationComponents, run_simulation
@@ -54,7 +55,7 @@ def create_app(
     @app.middleware("http")
     async def identify_simulation_mode(request: Request, call_next):
         response = await call_next(request)
-        effective_mode = "real" if request.url.path.rstrip("/") == "/transfers" else mode
+        effective_mode = "real" if request.url.path.rstrip("/") in {"/transfers", "/transfers/optimize"} or request.url.path.rstrip("/") == "/ephemeris/earth-moon" else mode
         response.headers["X-Simulation-Mode"] = effective_mode
         if effective_mode == "mock":
             response.headers["X-Simulation-Warning"] = MOCK_WARNING
@@ -100,6 +101,7 @@ def create_app(
 
     app.include_router(router)
     app.include_router(transfer_router)
+    app.include_router(ephemeris_router)
     return app
 
 

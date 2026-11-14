@@ -27,7 +27,7 @@ export default function App() {
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(21600)
   const controller = useRef<AbortController | null>(null)
-  const initialDate = useMemo(() => new Date(), [])
+  const [previewDate, setPreviewDate] = useState(() => new Date())
 
   const selected = journeys.find(j => j.id === selectedId) ?? null
   const transfer = selected?.response ?? null
@@ -86,7 +86,7 @@ export default function App() {
     setPlaying(p => !p)
   }
   const visibleCount = journeys.filter(j => j.visible).length
-  const sceneDate = transfer ? new Date(new Date(transfer.date).getTime() + time * 1000) : initialDate
+  const sceneDate = transfer ? new Date(new Date(transfer.date).getTime() + time * 1000) : previewDate
 
   return <div className="app-shell">
     <header className="topbar">
@@ -105,7 +105,7 @@ export default function App() {
     <main className="stage">
       {scene === 'solar'
         ? <SolarSystemView date={sceneDate} journeyCount={visibleCount} onEarth={() => setScene('earth')} />
-        : <TransferView transfer={transfer} state={state} time={time} visible={selected?.visible ?? false} color={selected?.color} onSolar={() => setScene('solar')} />}
+        : <TransferView date={previewDate} transfer={transfer} state={state} time={time} visible={selected?.visible ?? false} color={selected?.color} onSolar={() => setScene('solar')} />}
       <div className="scene-nav">
         <button type="button" className={scene === 'solar' ? 'scene-tab active' : 'scene-tab'} onClick={() => setScene('solar')}>
           <Icon name="globe" size={15} /> Sistema solar</button>
@@ -114,7 +114,7 @@ export default function App() {
       </div>
       {showForm && <div className="mission-panel panel-surface" aria-label="Configuración de transferencia">
         <button className="panel-close" type="button" onClick={() => setShowForm(false)} aria-label="Cerrar formulario"><Icon name="x" size={16} /></button>
-        <TransferForm busy={busy} onSubmit={calculate} onCancel={cancel} />
+        <TransferForm busy={busy} onSubmit={calculate} onCancel={cancel} onDateChange={setPreviewDate} />
         {error && <div role="alert" className="error-box"><Icon name="alert" size={18} /><span>{error}</span></div>}
       </div>}
       {selected && state && showResults && !showForm && <div className="results-overlay panel-surface">
@@ -136,8 +136,8 @@ export default function App() {
           onToggle={togglePlayback} onReset={() => { setPlaying(false); setTime(0) }}
           onTime={t => { setPlaying(false); setTime(t) }} onSpeed={setSpeed} />
       </div>}
-      <div className="source-disclaimer">{scene === 'solar' ? 'Panorámica ilustrativa. Sólo el cálculo Tierra–Luna utiliza JPL Horizons.'
-        : transfer ? 'Coordenadas y trayectoria de la simulación real del backend.' : 'Detalle ilustrativo, pendiente de simulación.'}</div>
+      <div className="source-disclaimer">{scene === 'solar' ? 'Panorámica solar ilustrativa. La vista Tierra–Luna consulta JPL Horizons para la fecha seleccionada.'
+        : transfer ? 'Coordenadas y trayectoria de la simulación real del backend.' : 'Vista Tierra–Luna: posiciones JPL Horizons si están disponibles; sin simulación de nave.'}</div>
     </main>
     {showDrawer && <>
       <button className="drawer-backdrop" aria-label="Cerrar menú de viajes" onClick={() => setShowDrawer(false)} />

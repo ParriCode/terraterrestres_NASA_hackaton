@@ -3,21 +3,18 @@ import type { FormEvent } from 'react'
 import type { TransferObjective, TransferRequest } from '../types/transfer'
 import Icon from './Icon'
 
-/**
- * Compatibilidad con POST /transfers actual: el backend aún necesita horizonte
- * y geometría explícitos. NO ES una búsqueda automática del tiempo óptimo.
- */
-const FIXED_DURATION_S = 10 * 86400
+/** La fecha se interpreta como UTC y la duración se envía en segundos. */
 const FIXED_LAUNCH_ANGLE_DEG = 90
-const FIXED_ARRIVAL_ANGLE_DEG = 0
 const SAMPLES = 400
+const SECONDS_PER_DAY = 86400
+const MAX_DAYS = 30 // backend/app/controllers/transfer_controller.py
 
 function utcNowForInput(): string { return new Date().toISOString().slice(0, 16) }
-type Props = { busy: boolean; onSubmit: (request: TransferRequest) => void; onCancel: () => void }
+type Props = { busy: boolean; onSubmit: (request: TransferRequest) => void; onCancel: () => void; onDateChange?: (date: Date) => void }
 
-export default function TransferForm({ busy, onSubmit, onCancel }: Props) {
-  // La entrada se interpreta explícitamente como UTC al serializar (no como huso horario local).
+export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }: Props) {
   const [date, setDate] = useState(utcNowForInput)
+  const [days, setDays] = useState('10')
   const [mass, setMass] = useState('1000')
   const [objective, setObjective] = useState<TransferObjective>('energia')
   const [error, setError] = useState('')
@@ -27,22 +24,43 @@ export default function TransferForm({ busy, onSubmit, onCancel }: Props) {
     if (!date) return setError('Introduce una fecha de salida UTC válida.')
     const instant = new Date(`${date}:00Z`)
     if (!Number.isFinite(instant.getTime())) return setError('La fecha de salida no es válida.')
+
+    const durationDays = Number(days)
+    if (!days.trim() || !Number.isFinite(durationDays) || durationDays <= 0 || durationDays > MAX_DAYS) {
+      return setError(`La duración debe ser mayor que 0 y como máximo ${MAX_DAYS} días.`)
+    }
     const massKg = Number(mass)
-    if (!mass.trim() || !Number.isFinite(massKg) || massKg <= 0) return setError('La masa debe ser un número positivo en kg.')
+    if (!mass.trim() || !Number.isFinite(massKg) || massKg <= 0) {
+      return setError('La masa debe ser un número positivo en kg.')
+    }
+
     setError('')
     onSubmit({
-      date: instant.toISOString(), objective, mass_kg: massKg, samples: SAMPLES,
-      duration_s: FIXED_DURATION_S,
+      date: instant.toISOString(),
+      duration_s: durationDays * SECONDS_PER_DAY,
       launch_angle_deg: FIXED_LAUNCH_ANGLE_DEG,
-      arrival_angle_deg: FIXED_ARRIVAL_ANGLE_DEG,
+      objective,
+      mass_kg: massKg,
+      samples: SAMPLES,
+      // NO enviamos arrival_angle_deg: el endpoint optimizado debe buscarlo.
     })
   }
 
   return <form className="transfer-form" onSubmit={submit} noValidate>
     <h2><Icon name="rocket" size={16} />Crear transferencia Tierra → Luna</h2>
-    <p className="form-description">Elige la fecha, la masa de la nave y qué criterio quieres priorizar.</p>
+    <p className="form-description">Elige la fecha, los días de vuelo, la masa y el criterio que prefieres optimizar.</p>
     <label>Fecha de salida (UTC)
-      <input type="datetime-local" value={date} onChange={e => setDate(e.target.value)} disabled={busy} required />
+      <input type="datetime-local" value={date} onChange={e => {
+        const value = e.target.value
+        setDate(value)
+        if (value) {
+          const next = new Date(`${value}:00Z`)
+          if (Number.isFinite(next.getTime())) onDateChange?.(next)
+        }
+      }} disabled={busy} required />
+    </label>
+    <label>Duración (días)
+      <input type="number" min="0.5" max={MAX_DAYS} step="0.5" value={days} onChange={e => setDays(e.target.value)} disabled={busy} required />
     </label>
     <label>Masa de la nave (kg)
       <input type="number" min="0.001" step="any" value={mass} onChange={e => setMass(e.target.value)} disabled={busy} required />
@@ -56,14 +74,14 @@ export default function TransferForm({ busy, onSubmit, onCancel }: Props) {
           onClick={() => setObjective('distancia')}>Mínima distancia</button>
       </div>
     </fieldset>
-    <p className="form-note">La masa modifica la energía total en J, no la trayectoria gravitatoria de una nave sin empuje.</p>
-    <details className="technical-details"><summary>Alcance científico de la búsqueda</summary>
-      <p>El backend actual busca candidatos para 10 días y geometría fija (90° de salida, 0° de llegada). La duración óptima automática todavía requiere una ampliación en Python. No se garantiza el óptimo global.</p>
+    <p className="form-note">El ángulo de llegada se busca automáticamente entre las alternativas físicamente válidas. La duración elegida es fija durante esa búsqueda.</p>
+    <details className="technical-details"><summary>Alcance de la búsqueda</summary>
+      <p>Se mantiene una salida técnica de 90°. El backend debe elegir el mejor ángulo de llegada entre los candidatos que evalúe. La búsqueda no garantiza un óptimo global. La masa cambia la energía de lanzamiento (J), no la trayectoria gravitatoria de la nave sin empuje.</p>
     </details>
     {error && <p className="form-error" role="alert">{error}</p>}
     {busy
-      ? <div className="form-actions"><span className="loading"><img src="/resource/loading_cohete_nubes.svg" alt="" />Calculando…</span>
+      ? <div className="form-actions"><span className="loading"><img src="/resource/loading_cohete_nubes.svg" alt="" />Buscando transferencia…</span>
         <button type="button" className="ghost-button" onClick={onCancel}>Cancelar</button></div>
-      : <button type="submit" className="primary-button"><Icon name="play" size={14} />Calcular transferencia</button>}
+      : <button type="submit" className="primary-button"><Icon name="play" size={14} />Buscar mejor transferencia</button>}
   </form>
 }
