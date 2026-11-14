@@ -60,6 +60,7 @@ def validate_non_empty_str(value: object, field_name: str) -> None:
     if not value.strip():
         raise ValueError(f"Field '{field_name}' cannot be empty.")
 
+
 # --- Estructuras del dominio ---
 
 # Guarda un cuerpo celeste con su id, nombre, valor gravitatorio y radio
@@ -113,7 +114,7 @@ class SimulationConfig:
             raise ValueError("'date' must include a timezone.")
 
 
-# Una muestra agrupa el estado y las posiciones en el mismo instante.
+
 @dataclass(frozen=True)
 class TrajectorySample:
     t_s: float
@@ -130,7 +131,6 @@ class TrajectorySample:
         for body_id, pos in self.body_positions_m.items():
             validate_non_empty_str(body_id, "body_positions_m key")
             validate_vec3(pos, f"body_positions_m['{body_id}']")
-
 
 
 # Registro de incidentes

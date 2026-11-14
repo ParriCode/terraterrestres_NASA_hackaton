@@ -11,8 +11,14 @@ const simulationPath = import.meta.env.VITE_SIMULATION_PATH || '/simulations'
 const ephemeridesPath = import.meta.env.VITE_EPHEMERIDES_PATH || ''
 
 export class ApiError extends Error {
+<<<<<<< HEAD
   readonly status?: number
   constructor(message: string, status?: number) {
+=======
+  readonly status: number
+
+  constructor(status: number, message: string) {
+>>>>>>> origin/desarrollo-jose
     super(message)
     this.name = 'ApiError'
     this.status = status
@@ -23,7 +29,7 @@ function isVec3(value: unknown): value is Vec3 {
   return Array.isArray(value) && value.length === 3 && value.every(v => typeof v === 'number' && Number.isFinite(v))
 }
 
-/** Validación ligera de estructura para evitar animar respuestas incompatibles */
+/** Validación ligera de estructura para evitar animar respuestas incompatibles. */
 export function isSimulationResult(value: unknown): value is SimulationResult {
   if (!value || typeof value !== 'object') return false
   const r = value as Partial<SimulationResult>
@@ -47,30 +53,30 @@ export async function runSimulation(config: SimulationConfig): Promise<Simulatio
       body: JSON.stringify(config), signal: AbortSignal.timeout(90_000),
     })
   } catch {
-    throw new ApiError('No se ha podido conectar con FastAPI. Comprueba que esté iniciado y que la ruta coincida con la de Rafa.')
+    throw new ApiError(0, 'No se ha podido conectar con FastAPI. Comprueba que esté iniciado y que la ruta coincida con la de Rafa.')
   }
   if (!response.ok) {
     const data: unknown = await response.json().catch(() => null)
     const details = data && typeof data === 'object' && 'detail' in data
-      ? JSON.stringify((data as {detail: unknown}).detail) : response.statusText
-    throw new ApiError(`FastAPI: ${details}`, response.status)
+      ? JSON.stringify((data as { detail: unknown }).detail) : response.statusText
+    throw new ApiError(response.status, `FastAPI: ${details}`)
   }
   const data: unknown = await response.json().catch(() => null)
-  if (!isSimulationResult(data)) throw new ApiError('FastAPI ha respondido con un formato distinto al contrato JSON v1.')
+  if (!isSimulationResult(data)) throw new ApiError(0, 'FastAPI ha respondido con un formato distinto al contrato JSON v1.')
   return data
 }
 
-/** La ruta de efemérides es optativa: no se inventan posiciones reales si no existe*/
+/** La ruta de efemérides es optativa: no se inventan posiciones reales si no existe. */
 export async function fetchEphemerides(iso: string, signal?: AbortSignal): Promise<EphemerisSnapshot | null> {
   if (!ephemeridesPath) return null
   const url = `${baseURL}${ephemeridesPath}${ephemeridesPath.includes('?') ? '&' : '?'}at=${encodeURIComponent(iso)}`
   const response = await fetch(url, { signal })
-  if (!response.ok) throw new ApiError(`Efemérides: HTTP ${response.status}`, response.status)
+  if (!response.ok) throw new ApiError(response.status, `Efemérides: HTTP ${response.status}`)
   const data: unknown = await response.json()
-  if (!data || typeof data !== 'object') throw new ApiError('Formato de efemérides incorrecto')
+  if (!data || typeof data !== 'object') throw new ApiError(0, 'Formato de efemérides incorrecto')
   const e = data as Partial<EphemerisSnapshot>
-  if (e.frame !== 'ssb_icrf' || !e.positions_m || !['sun','mercury','venus','earth','mars','jupiter','saturn','uranus','neptune','moon'].every(id => isVec3(e.positions_m?.[id]))) {
-    throw new ApiError('Faltan cuerpos o el marco SSB/ICRF en las efemérides')
+  if (e.frame !== 'ssb_icrf' || !e.positions_m || !['sun', 'mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'moon'].every(id => isVec3(e.positions_m?.[id]))) {
+    throw new ApiError(0, 'Faltan cuerpos o el marco SSB/ICRF en las efemérides')
   }
   return e as EphemerisSnapshot
 }
