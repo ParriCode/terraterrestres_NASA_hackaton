@@ -11,14 +11,9 @@ const simulationPath = import.meta.env.VITE_SIMULATION_PATH || '/simulations'
 const ephemeridesPath = import.meta.env.VITE_EPHEMERIDES_PATH || ''
 
 export class ApiError extends Error {
-<<<<<<< HEAD
-  readonly status?: number
-  constructor(message: string, status?: number) {
-=======
   readonly status: number
 
   constructor(status: number, message: string) {
->>>>>>> origin/desarrollo-jose
     super(message)
     this.name = 'ApiError'
     this.status = status

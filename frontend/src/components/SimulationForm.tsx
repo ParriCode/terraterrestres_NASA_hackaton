@@ -38,21 +38,29 @@ export default function SimulationForm({ open, busy, onClose, onDemo, onBackend 
     if (!calculateScienceBudget(science, durationH * 3600).goal_has_required_instrument) { setError('Selecciona el instrumento necesario para el objetivo científico.'); return null }
     if (![...position, ...velocity].every(Number.isFinite)) { setError('Las posiciones y velocidades deben ser números finitos.'); return null }
     setError('')
-    const launchIso = date.toISOString()
+        const launchIso = date.toISOString()
+
     return {
-<<<<<<< HEAD
-      name: name.trim(), launch_iso: date.toISOString(), route_kind: routeKind,
-      optimization_goal: optimizationGoal, min_flyby_altitude_km: minAltitudeKm, config: {
-        date: date.toISOString(),
-        scenario_id: 'mock_earth_moon_v1', duration_s: durationH * 3600, step_s: step,
-=======
-      name: name.trim(), launch_iso: launchIso, route_kind: routeKind,
-      optimization_goal: optimizationGoal, min_flyby_altitude_km: minAltitudeKm, science: { ...science, instrument_ids: [...science.instrument_ids] }, config: {
+      name: name.trim(),
+      launch_iso: launchIso,
+      route_kind: routeKind,
+      optimization_goal: optimizationGoal,
+      min_flyby_altitude_km: minAltitudeKm,
+      science: {
+        ...science,
+        instrument_ids: [...science.instrument_ids],
+      },
+      config: {
         date: launchIso,
-        scenario_id: 'earth_moon_circular_v1', duration_s: durationH * 3600, step_s: step,
->>>>>>> origin/desarrollo-jose
-        initial_state: { position_m: position, velocity_m_s: velocity },
-      }
+        scenario_id: 'mock_earth_moon_v1',
+        duration_s: durationH * 3600,
+        step_s: step,
+        initial_state: {
+          position_m: position,
+          velocity_m_s: velocity,
+        },
+      },
+    }
     }
   }
   function submit(kind: 'demo' | 'backend') {
