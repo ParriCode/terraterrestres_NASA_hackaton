@@ -1,3 +1,4 @@
+"""Creación de los cuerpos, nave y simulación."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -32,30 +33,31 @@ class SimulationStatus(str, Enum):
 
 def validate_finite(value: float, field_name: str) -> None:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
-        raise ValueError(f"El campo '{field_name}' debe ser un número finito (recibido: {value}).")
+        raise ValueError(f"Field '{field_name}' must be a finite number (received: {value}).")
 
 
 def validate_positive(value: float, field_name: str) -> None:
     validate_finite(value, field_name)
     if value <= 0.0:
-        raise ValueError(f"El campo '{field_name}' debe ser estrictamente positivo (recibido: {value}).")
+        raise ValueError(f"Field '{field_name}' must be strictly positive (received: {value}).")
 
 
 def validate_non_negative(value: float, field_name: str) -> None:
     validate_finite(value, field_name)
     if value < 0.0:
-        raise ValueError(f"El campo '{field_name}' no puede ser negativo (recibido: {value}).")
+        raise ValueError(f"Field '{field_name}' cannot be negative (received: {value}).")
 
 
 def validate_vec3(vec: Vec3, field_name: str) -> None:
     if not isinstance(vec, tuple) or len(vec) != 3:
-        raise ValueError(f"El campo '{field_name}' debe ser una tupla Vec3 de 3 elementos (recibido: {vec}).")
+        raise ValueError(f"Field '{field_name}' must be a 3-element Vec3 tuple (received: {vec}).")
     for idx, component in enumerate(vec):
         validate_finite(component, f"{field_name}[{idx}]")
 
 
 # --- Estructuras del dominio ---
 
+# Guarda un cuerpo celeste con su id, nombre, valor gravitatorio y radio
 @dataclass(frozen=True)
 class CelestialBody:
     id: str
@@ -73,6 +75,7 @@ class CelestialBody:
         validate_positive(self.radius_m, "radius_m")
 
 
+# Un instante de la nave con su posición y velocidad
 @dataclass(frozen=True)
 class SpacecraftState:
     position_m: Vec3
@@ -84,6 +87,8 @@ class SpacecraftState:
         validate_vec3(self.velocity_m_s, "velocity_m_s")
 
 
+# Lo necesario para lanzar una simulación, id, estado inicial de la nave, tiempo de simulación
+# y salto de tiempo de integración
 @dataclass(frozen=True)
 class SimulationConfig:
     scenario_id: str
@@ -101,6 +106,7 @@ class SimulationConfig:
         validate_positive(self.step_s, "step_s")
 
 
+# Define una misión con nombre, cuerpo de salida y llegada y fecha
 @dataclass(frozen=True)
 class Simulation:
     name: str
@@ -122,6 +128,7 @@ class Simulation:
             raise TypeError("'date' must be a valid datetime instance.")
 
 
+# Une en un tiempo el estado de la nave y las posiciones de los cuerpos
 @dataclass(frozen=True)
 class TrajectorySample:
     t_s: float
@@ -141,6 +148,7 @@ class TrajectorySample:
             validate_vec3(pos, f"body_positions_m['{body_id}']")
 
 
+# Registro de incidentes
 @dataclass(frozen=True)
 class Event:
     type: EventType
@@ -158,6 +166,7 @@ class Event:
         validate_vec3(self.position_m, "position_m")
 
 
+# Resumen de diagnostico de pasos completados, tiempo y distancias
 @dataclass(frozen=True)
 class Diagnostics:
     final_time_s: float
@@ -176,6 +185,7 @@ class Diagnostics:
             validate_finite(alt, f"min_altitude_m['{body_id}']")
 
 
+# Resultado final
 @dataclass(frozen=True)
 class SimulationResult:
     config: SimulationConfig
