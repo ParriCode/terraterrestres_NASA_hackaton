@@ -1,0 +1,7 @@
+{
+  "Content-Type": "application/json",
+  "X-Simulation-Mode": "mock",
+  "X-Simulation-Warning": "FICTITIOUS_DATA_NO_ORBITAL_PHYSICS",
+  "Access-Control-Allow-Origin": "http://localhost:5173",
+  "Access-Control-Expose-Headers": "X-Simulation-Mode, X-Simulation-Warning"
+}
