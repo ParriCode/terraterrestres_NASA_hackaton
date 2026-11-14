@@ -60,6 +60,7 @@ def validate_non_empty_str(value: object, field_name: str) -> None:
     if not value.strip():
         raise ValueError(f"Field '{field_name}' cannot be empty.")
 
+
 # --- Estructuras del dominio ---
 
 # Guarda un cuerpo celeste con su id, nombre, valor gravitatorio y radio
@@ -111,28 +112,6 @@ class SimulationConfig:
             raise TypeError("'date' must be a datetime instance.")
         if self.date.utcoffset() is None:
             raise ValueError("'date' must include a timezone.")
-
-
-
-#@dataclass(frozen=True)
-class Simulation:
-    name: str
-    origin_body: CelestialBody
-    destination_body: CelestialBody
-    date: datetime
-
-    # Variable validations
-    def __post_init__(self) -> None:
-        if not self.name or not self.name.strip():
-            raise ValueError("The 'name' cannot be empty.")
-        if not isinstance(self.origin_body, CelestialBody):
-            raise TypeError("'origin_body' must be an instance of CelestialBody.")
-        if not isinstance(self.destination_body, CelestialBody):
-            raise TypeError("'destination_body' must be an instance of CelestialBody.")
-        if self.origin_body.id == self.destination_body.id:
-            raise ValueError("'origin_body' and 'destination_body' must be different bodies.")
-        if not isinstance(self.date, datetime):
-            raise TypeError("'date' must be a valid datetime instance.")
 
 
 # Une en un tiempo el estado de la nave y las posiciones de los cuerpos
