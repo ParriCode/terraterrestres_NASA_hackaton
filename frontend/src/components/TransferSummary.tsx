@@ -59,7 +59,7 @@ export default function TransferSummary({ transfer, state }: Props) {
             <small>Altitud mínima sobre superficie lunar</small>
           </div>
           <div>
-            <span>Corredor de reentrada</span>
+            <span>Altitud de entrada terrestre</span>
             <strong>{formatKm(transfer.earth_reentry_altitude_m)}</strong>
             <small>Altitud mínima de regreso en Tierra</small>
           </div>
@@ -95,7 +95,7 @@ export default function TransferSummary({ transfer, state }: Props) {
   return (
     <aside className="results-panel">
       <h2><Icon name="layers" size={16} />Transferencia seleccionada</h2>
-      <p className="result-caption">Mínimo Δv validado (DOP853) · {transfer.source}</p>
+      <p className="result-caption">Mejor candidato validado (DOP853) · {transfer.source}</p>
       <div className="result-grid">
         <div><span>Duración elegida</span><strong>{days(transfer.duration_s)} días</strong>
           <small>Límite máximo: {days(transfer.max_duration_s)} días</small></div>

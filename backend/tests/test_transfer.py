@@ -173,5 +173,14 @@ def test_earth_reimpact_from_parking_orbit_is_rejected(circular_ephemeris):
     # Salida en la cara opuesta a la Luna apuntando hacia la trayectoria recta que atraviesa la Tierra.
     x0 = orbit_point(earth, moon, 0.0, 180.0, 200_000.0)
     x1 = orbit_point(moon, earth, 5 * 86400, 0.0, 0.0)
-    with pytest.raises((TransferNotFoundError, ValueError)):
-        F(x0, x1, 0.0, 5 * 86400, "delta_v", scenario=scenario, parking_alt_m=200_000.0)
+    # El ángulo opuesto a la Luna no implica necesariamente impacto;
+    # si existe una trayectoria válida, debe permanecer fuera de la Tierra.
+    try:
+        result = F(x0, x1, 0.0, 5 * 86400, "delta_v", scenario=scenario, parking_alt_m=200_000.0)
+    except TransferNotFoundError:
+        return
+    times = np.linspace(0, result.t1_s, 2000)
+    ship_xy = result._solution.sol(times)[:2].T
+    earth_xy = np.asarray(earth._motion(times))[:, :2]
+    altitude = np.linalg.norm(ship_xy - earth_xy, axis=1) - earth.radius_m
+    assert np.min(altitude) >= -10.0

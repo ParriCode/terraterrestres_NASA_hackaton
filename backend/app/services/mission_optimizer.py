@@ -6,7 +6,7 @@ from typing import Literal, Sequence
 
 import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.optimize import least_squares
+from scipy.optimize import brentq, least_squares, minimize_scalar
 
 from app.data.scenarios import PlanarScenario, SpatialScenario
 from app.models.domain import SpacecraftState, Vec3
@@ -514,7 +514,21 @@ def _propagate_3d(
     atol: float = 1e-8,
     dense_output: bool = True,
 ):
-    return solve_ivp(
+    # Detener la integración ante impactos en lugar de aproximarse a la
+    # singularidad gravitatoria con pasos cada vez menores.
+    events = []
+    for body in bodies:
+        if body.id not in ("earth", "moon"):
+            continue
+
+        def impact(t, y, selected=body):
+            return float(np.linalg.norm(y[:3] - np.asarray(selected.pos(t))) - selected.radius_m)
+
+        impact.terminal = True
+        impact.direction = -1
+        events.append(impact)
+
+    solution = solve_ivp(
         lambda t, y: state_derivative_array(t, y, bodies),
         (float(t0), float(t1)),
         np.asarray(y0, dtype=np.float64),
@@ -522,7 +536,12 @@ def _propagate_3d(
         rtol=rtol,
         atol=atol,
         dense_output=dense_output,
+        events=events or None,
     )
+    if solution.success and solution.t[-1] < float(t1) - 1e-3:
+        solution.success = False
+        solution.message = "La trayectoria impactó un cuerpo antes del fin del tramo."
+    return solution
 
 
 def _parking_state_3d(
@@ -581,25 +600,45 @@ def _shoot_3d_target(
         np.zeros(3, dtype=np.float64),
         method="trf",
         bounds=(-15.0, 15.0),
-        ftol=1e-7,
-        xtol=1e-7,
-        max_nfev=45,
+        ftol=1e-6,
+        xtol=1e-6,
+        gtol=1e-6,
+        max_nfev=24,
     )
     v0_opt = v0_guess + opt.x * scale
     sol_final = _propagate_3d(
         bodies, np.concatenate((r0, v0_opt)), t0, t1, rtol=1e-9, atol=1e-9, dense_output=True
     )
+    if not sol_final.success or sol_final.y.size == 0:
+        return False, v0_opt, sol_final
     err_m = float(np.linalg.norm(sol_final.y[:3, -1] - target_r))
-    return bool(sol_final.success and err_m <= tol_m), v0_opt, sol_final
+    return bool(err_m <= tol_m), v0_opt, sol_final
 
 
-def _min_body_altitude(sol, body, t0: float, t1: float, n: int = 800) -> tuple[float, float]:
+def _min_body_altitude(sol, body, t0: float, t1: float, n: int = 240, *, refine: bool = True) -> tuple[float, float]:
     """Devuelve (altitud_minima_m, instante_t_s) de una solución densa respecto a un cuerpo."""
+    if not (t0 < t1):
+        raise ValueError("El intervalo de búsqueda de altitud debe tener duración positiva.")
     ts = np.linspace(t0, t1, n)
-    ys = sol.sol(ts)[:3].T
-    b_pos = np.array([body.pos(float(t)) for t in ts])
+    ys = np.asarray(sol.sol(ts)[:3]).T
+    motion = getattr(body, "_motion", None)
+    if callable(motion):
+        b_pos = np.asarray(motion(ts))
+    else:
+        b_pos = np.asarray([body.pos(float(t)) for t in ts])
     dists = np.linalg.norm(ys - b_pos, axis=1)
     idx = int(np.argmin(dists))
+    # La mínima separación puede ocurrir entre muestras; refinar solo cerca
+    # del mínimo evita infravalorar colisiones y requiere pocas evaluaciones.
+    lo, hi = ts[max(0, idx - 1)], ts[min(n - 1, idx + 1)]
+    if refine and lo < hi:
+        local = minimize_scalar(
+            lambda t: float(np.linalg.norm(np.asarray(sol.sol(t)[:3]) - np.asarray(body.pos(t)))),
+            bounds=(float(lo), float(hi)), method="bounded",
+            options={"xatol": 0.1, "maxiter": 35},
+        )
+        if local.success and local.fun < dists[idx]:
+            return float(local.fun - body.radius_m), float(local.x)
     return float(dists[idx] - body.radius_m), float(ts[idx])
 
 
@@ -623,6 +662,16 @@ def optimize_round_trip_transfer(
     """
     if mode not in ("free_return", "lunar_orbit"):
         raise ValueError("mode debe ser 'free_return' o 'lunar_orbit'.")
+    if not all(np.isfinite(x) for x in (
+        max_total_duration_s, parking_alt_m, lunar_periapsis_alt_m,
+        lunar_stay_s, reentry_alt_m, mass_kg,
+    )):
+        raise ValueError("Los parámetros numéricos de misión deben ser finitos.")
+    if (parking_alt_m < 100_000.0 or lunar_periapsis_alt_m < 20_000.0
+            or lunar_stay_s < 0.0 or reentry_alt_m < 50_000.0 or mass_kg <= 0):
+        raise ValueError("Altitudes, estancia o masa fuera del dominio físico permitido.")
+    if mode == "free_return" and lunar_stay_s > 0:
+        raise ValueError("free_return no admite estancia orbital.")
     if max_total_duration_s < 5.5 * 86400.0 + lunar_stay_s:
         raise NoFeasibleTransfer(
             [
@@ -647,7 +696,11 @@ def optimize_round_trip_transfer(
 
     # Exploración de ventanas de ida (3.0 a 4.5 días) y ángulos de fase en órbita baja.
     out_durations = [d * 86400.0 for d in (3.0, 3.5, 4.0, 4.5) if d * 86400.0 + lunar_stay_s + 2.5 * 86400.0 <= max_total_duration_s]
-    launch_angles = tuple(float(a) for a in range(180, 360, 20))
+    launch_angles = tuple(float(a) for a in range(180, 360, 30))
+    # Límite estricto de semillas propagadas; un HTTP 200 sin solución es
+    # preferible a monopolizar un trabajador de FastAPI indefinidamente.
+    max_solver_attempts = 12
+    solver_attempts = 0
 
     if mode == "free_return":
         # En retorno libre, la nave pasa por delante/detrás de la Luna para invertir su velocidad
@@ -660,6 +713,8 @@ def optimize_round_trip_transfer(
             target_peri_1 = m_pos_1 + r_p_moon * u_m_vel
 
             for alpha in launch_angles:
+                if solver_attempts >= max_solver_attempts:
+                    break
                 r0, v_park = _parking_state_3d(earth, moon, alpha, parking_alt_m)
                 try:
                     seed = solve_lambert(
@@ -672,6 +727,7 @@ def optimize_round_trip_transfer(
                 except (LambertError, ValueError, ArithmeticError):
                     continue
 
+                solver_attempts += 1
                 v_guess = e_vel_0 + np.asarray(seed.departure_velocity_m_s, dtype=np.float64)
                 t_in_est = min(t_out * 1.05, max_total_duration_s - t_out)
                 t_total_est = t_out + t_in_est
@@ -684,8 +740,8 @@ def optimize_round_trip_transfer(
                     )
                     if not sol.success:
                         return np.array([1e6, 1e6, 1e6])
-                    min_m_alt, _ = _min_body_altitude(sol, moon, 0.5 * t_out, min(t_flight, 1.5 * t_out), n=400)
-                    min_e_alt, _ = _min_body_altitude(sol, earth, t_out + 1.0 * 86400.0, t_flight, n=500)
+                    min_m_alt, _ = _min_body_altitude(sol, moon, 0.5 * t_out, min(t_flight, 1.5 * t_out), n=150, refine=False)
+                    min_e_alt, _ = _min_body_altitude(sol, earth, t_out + 1.0 * 86400.0, t_flight, n=180, refine=False)
                     # Penalización suave por Δv para preferir el retorno libre mínimo
                     dv_pen = np.linalg.norm(v_try - v_park) / 100.0
                     return np.array([
@@ -699,9 +755,10 @@ def optimize_round_trip_transfer(
                     np.zeros(4, dtype=np.float64),
                     method="trf",
                     bounds=([-10.0, -10.0, -10.0, -36.0], [10.0, 10.0, 10.0, 36.0]),
-                    ftol=1e-6,
-                    xtol=1e-6,
-                    max_nfev=40,
+                    ftol=1e-5,
+                    xtol=1e-5,
+                    gtol=1e-5,
+                    max_nfev=18,
                 )
                 v0_opt = v_guess + fit.x[:3] * 50.0
                 t_total_opt = float(np.clip(t_total_est + fit.x[3] * 3600.0, t_out + 2.0 * 86400.0, max_total_duration_s))
@@ -711,16 +768,34 @@ def optimize_round_trip_transfer(
                 if not sol_full.success:
                     continue
 
-                min_m_alt, t_peri_m = _min_body_altitude(sol_full, moon, 0.5 * t_out, min(t_total_opt, 1.5 * t_out), n=600)
-                min_e_alt, t_reentry = _min_body_altitude(sol_full, earth, t_peri_m + 86400.0, t_total_opt, n=800)
+                min_m_alt, t_peri_m = _min_body_altitude(sol_full, moon, 0.5 * t_out, min(t_total_opt, 1.5 * t_out))
+                if t_peri_m + 86400.0 >= t_total_opt:
+                    reasons.append("No hay tiempo suficiente de retorno tras el perilunio")
+                    continue
+                min_e_alt, _ = _min_body_altitude(sol_full, earth, t_peri_m + 86400.0, t_total_opt)
 
-                if min_m_alt < 20_000.0 or abs(min_m_alt - lunar_periapsis_alt_m) > 150_000.0:
+                if min_m_alt < 20_000.0 or abs(min_m_alt - lunar_periapsis_alt_m) > 75_000.0:
                     reasons.append(f"Perilunio fuera de corredor ({min_m_alt / 1000:.1f} km)")
                     continue
-                if min_e_alt < 0.0 or abs(min_e_alt - reentry_alt_m) > 150_000.0:
-                    reasons.append(f"Reentrada fuera de corredor ({min_e_alt / 1000:.1f} km)")
+                if min_e_alt < 0.0 or min_e_alt > reentry_alt_m:
+                    reasons.append(f"No existe cruce descendente seguro de reentrada ({min_e_alt / 1000:.1f} km)")
                     continue
 
+                # Buscar el PRIMER cruce descendente de la interfaz de reentrada,
+                # no el instante de perigeo (donde la velocidad radial es cero).
+                search_t = np.linspace(t_peri_m + 86400.0, t_total_opt, 240)
+                earth_motion = getattr(earth, "_motion", None)
+                earth_path = np.asarray(earth_motion(search_t)) if callable(earth_motion) else np.asarray([earth.pos(float(t)) for t in search_t])
+                clearance = np.linalg.norm(sol_full.sol(search_t)[:3].T - earth_path, axis=1) - r_reentry
+                crossings = np.flatnonzero((clearance[:-1] > 0.0) & (clearance[1:] <= 0.0))
+                if not len(crossings):
+                    reasons.append("No se cruza la interfaz de reentrada en descenso")
+                    continue
+                first = int(crossings[0])
+                t_reentry = float(brentq(
+                    lambda t: float(np.linalg.norm(sol_full.sol(t)[:3] - np.asarray(earth.pos(t))) - r_reentry),
+                    float(search_t[first]), float(search_t[first + 1]), xtol=0.01,
+                ))
                 tli_dv = float(np.linalg.norm(v0_opt - v_park))
                 cand_rt = RoundTripResult(
                     scenario=scenario,
@@ -734,7 +809,9 @@ def optimize_round_trip_transfer(
                     tei_delta_v_m_s=0.0,
                     total_delta_v_m_s=tli_dv,
                     min_lunar_altitude_m=float(min_m_alt),
-                    earth_reentry_altitude_m=float(min_e_alt),
+                    earth_reentry_altitude_m=float(
+                        np.linalg.norm(sol_full.sol(t_reentry)[:3] - np.asarray(earth.pos(t_reentry))) - earth.radius_m
+                    ),
                     mass_kg=float(mass_kg),
                     _segments=((0.0, float(t_reentry), sol_full),),
                 )
@@ -757,6 +834,8 @@ def optimize_round_trip_transfer(
             target_peri_1 = m_pos_1 - r_p_moon * u_m_vel
 
             for alpha in launch_angles:
+                if solver_attempts >= max_solver_attempts:
+                    break
                 r0, v_park = _parking_state_3d(earth, moon, alpha, parking_alt_m)
                 try:
                     seed_out = solve_lambert(
@@ -769,6 +848,7 @@ def optimize_round_trip_transfer(
                 except (LambertError, ValueError, ArithmeticError):
                     continue
 
+                solver_attempts += 1
                 v_guess_out = e_vel_0 + np.asarray(seed_out.departure_velocity_m_s, dtype=np.float64)
                 ok_out, v0_opt, sol_out = _shoot_3d_target(
                     bodies, r0, v_guess_out, 0.0, t_out, lambda _t, p=target_peri_1: p, tol_m=5_000.0
@@ -849,8 +929,25 @@ def optimize_round_trip_transfer(
 
                 tei_dv = float(np.linalg.norm(v_tei_opt - v_pre_tei))
                 total_dv = float(tli_dv + loi_dv + tei_dv)
-                min_m_alt, _ = _min_body_altitude(sol_out, moon, 0.5 * t_out, t_out, n=400)
-                min_e_alt, _ = _min_body_altitude(sol_in, earth, t_depart_moon + 0.5 * t_in, t_end, n=400)
+                min_m_alt, _ = _min_body_altitude(sol_out, moon, 0.5 * t_out, t_out)
+                min_e_alt, _ = _min_body_altitude(sol_in, earth, t_depart_moon + 0.5 * t_in, t_end)
+                actual_reentry_alt = float(
+                    np.linalg.norm(sol_in.y[:3, -1] - np.asarray(earth.pos(t_end))) - earth.radius_m
+                )
+                radial_in = float(np.dot(
+                    sol_in.y[:3, -1] - np.asarray(earth.pos(t_end)),
+                    sol_in.y[3:, -1] - np.asarray(earth.speed(t_end)),
+                ))
+                if (min_m_alt < 20_000.0 or abs(min_m_alt - lunar_periapsis_alt_m) > 15_000.0
+                        or min_e_alt < 0.0 or abs(actual_reentry_alt - reentry_alt_m) > 15_000.0
+                        or radial_in >= 0.0):
+                    reasons.append("Perilunio, impacto terrestre o dirección de reentrada fuera del corredor")
+                    continue
+                if sol_stay is not None:
+                    min_stay_alt, _ = _min_body_altitude(sol_stay, moon, t_out, t_depart_moon)
+                    if min_stay_alt < 20_000.0:
+                        reasons.append("La órbita lunar intermedia cruza la superficie")
+                        continue
 
                 segments = [(0.0, float(t_out), sol_out)]
                 if sol_stay is not None:
@@ -868,8 +965,8 @@ def optimize_round_trip_transfer(
                     loi_delta_v_m_s=loi_dv,
                     tei_delta_v_m_s=tei_dv,
                     total_delta_v_m_s=total_dv,
-                    min_lunar_altitude_m=float(min_m_alt),
-                    earth_reentry_altitude_m=float(min_e_alt),
+                    min_lunar_altitude_m=float(min_m_alt if sol_stay is None else min(min_m_alt, min_stay_alt)),
+                    earth_reentry_altitude_m=float(actual_reentry_alt),
                     mass_kg=float(mass_kg),
                     _segments=tuple(segments),
                 )

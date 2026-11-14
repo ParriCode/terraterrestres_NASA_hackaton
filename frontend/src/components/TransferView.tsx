@@ -79,45 +79,23 @@ export default function TransferView({ transfer, state }: Props) {
   const is3D = transfer.frame === 'earth_moon_barycentric_orbital_3d'
 
   const sunDirectionDeg = useMemo(() => {
-    const totalT = transfer.samples[transfer.samples.length - 1]?.t_s || 1
-    const idx = clamp(
-      Math.round((state.t_s / totalT) * (transfer.samples.length - 1)),
-      0,
-      transfer.samples.length - 1,
-    )
-    const sun = transfer.samples[idx]?.body_positions_m.sun
-    if (!sun) return null
-    return (Math.atan2(-sun[1], sun[0]) * 180) / Math.PI
-  }, [transfer.samples, state.t_s])
+    const samples = transfer.samples
+    if (!samples[0]?.body_positions_m.sun) return null
+    let lo = 0, hi = samples.length - 1
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1
+      if (samples[mid].t_s <= state.t_s) lo = mid
+      else hi = mid
+    }
+    const start = samples[lo], end = samples[hi]
+    const a = start.body_positions_m.sun, b = end.body_positions_m.sun
+    if (!a || !b) return null
+    const weight = clamp((state.t_s - start.t_s) / (end.t_s - start.t_s), 0, 1)
+    const solarX = a[0] + (b[0] - a[0]) * weight - state.earth_m[0]
+    const solarY = a[1] + (b[1] - a[1]) * weight - state.earth_m[1]
+    return Math.atan2(-solarY, solarX) * 180 / Math.PI
+  }, [transfer.samples, state.t_s, state.earth_m])
 
-  {
-    sunDirectionDeg !== null && (
-      <div
-        title="Dirección real del Sol (perturbación de 4.º cuerpo)"
-        style={{
-          position: 'absolute',
-          top: 14,
-          left: 14,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 10px',
-          borderRadius: 999,
-          background: 'rgba(10, 18, 34, 0.82)',
-          border: '1px solid rgba(255, 200, 87, 0.35)',
-          color: '#ffe29a',
-          fontSize: 12,
-          pointerEvents: 'none',
-        }}
-      >
-        <img src="/resource/sol.svg" alt="" width={18} height={18} />
-        <span>Sol</span>
-        <span style={{ display: 'inline-block', transform: `rotate(${sunDirectionDeg.toFixed(1)}deg)`, fontWeight: 700 }}>
-          →
-        </span>
-      </div>
-    )
-  }
   return <div className="transfer-view">
     <svg ref={svg} viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`} preserveAspectRatio="xMidYMid meet"
       onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove}
@@ -146,6 +124,11 @@ export default function TransferView({ transfer, state }: Props) {
         stroke="#ffbd69" strokeWidth={1.6 * unit} markerEnd="url(#arrow-head)" />}
       <circle cx={ship.x} cy={ship.y} r={6 * unit} className="ship-sphere"><title>Nave</title></circle>
     </svg>
+    {sunDirectionDeg !== null && <div className="sun-compass" title="Dirección del Sol relativa a la Tierra, proyectada en el plano XY">
+      <img src="/resource/sol.svg" alt="" width={20} height={20} />
+      <span>Sol</span>
+      <span className="sun-compass-arrow" aria-label={`Dirección ${sunDirectionDeg.toFixed(0)} grados`} style={{ transform: `rotate(${sunDirectionDeg}deg)` }}>→</span>
+    </div>}
     <div className="view-toolbar">
       <button className="icon-button" onClick={() => zoom(1 / 1.5)} aria-label="Acercar" title="Acercar"><Icon name="plus" /></button>
       <button className="icon-button" onClick={() => zoom(1.5)} aria-label="Alejar" title="Alejar"><Icon name="minus" /></button>

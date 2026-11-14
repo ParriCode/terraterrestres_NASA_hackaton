@@ -14,7 +14,7 @@ type Props = {
 
 export default function TransferForm({ busy, onSubmit, onCancel }: Props) {
   const [profile, setProfile] = useState<MissionProfile>('one_way')
-  const [date, setDate] = useState('2026-11-14T00:00')
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 16))
   const [maxDays, setMaxDays] = useState(10)
   const [lunarPeriAltKm, setLunarPeriAltKm] = useState(150)
   const [lunarStayHours, setLunarStayHours] = useState(24)
@@ -162,7 +162,7 @@ export default function TransferForm({ busy, onSubmit, onCancel }: Props) {
 
       <div className="assumption-pill">
         <span>Modelo físico</span>
-        <strong>Órbita de aparcamiento: 200 km · 4 cuerpos (Tierra, Luna, Sol, Nave)</strong>
+        <strong>Órbita de aparcamiento: 200 km · {profile === 'one_way' ? '2D: Tierra, Luna y nave' : '3D: Tierra, Luna, Sol y nave'}</strong>
         <small>
           {profile === 'one_way'
             ? 'Minimiza Δv total estimado · Efemérides NASA/JPL Horizons'

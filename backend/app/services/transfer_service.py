@@ -186,12 +186,14 @@ def F(
             return
 
         times = np.linspace(t0, t1, 2000)
-        relative = solution.sol(times)[:2].T - _earth_positions_xy(earth, times)
+        spacecraft_xy = solution.sol(times)[:2].T
+        relative = spacecraft_xy - _earth_positions_xy(earth, times)
         if float(np.min(np.linalg.norm(relative, axis=1))) < earth.radius_m - 10.0:
             reasons.append("La trayectoria penetra en la Tierra")
             return
 
-        length = float(np.linalg.norm(np.diff(relative, axis=0), axis=1).sum())
+        # Distancia recorrida en el mismo marco que las posiciones expuestas por la API.
+        length = float(np.linalg.norm(np.diff(spacecraft_xy, axis=0), axis=1).sum())
         rel_dep_vel = velocity - earth_velocity
         launch_speed = float(np.linalg.norm(rel_dep_vel))
         launch_delta_v = float(np.linalg.norm(rel_dep_vel - v_circ_vec))

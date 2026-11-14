@@ -7,7 +7,7 @@ import numpy as np
 from scipy.interpolate import CubicHermiteSpline
 
 from app.data.bodies import load_bodies
-from app.data.ephemeris import get_body_state_table
+from app.data import ephemeris
 from app.models.domain import (
     CelestialBody,
     SimulationConfig,
@@ -95,7 +95,7 @@ def _build_interpolated_bodies(
     for key in selected_ids:
         if key not in catalog:
             continue
-        times_t, pos_t, vel_t = get_body_state_table(catalog[key], date, stop_date, intervals)
+        times_t, pos_t, vel_t = ephemeris.get_body_state_table(catalog[key], date, stop_date, intervals)
         times = np.asarray(times_t, dtype=np.float64)
         times[-1] = float(duration_s)
         pos = np.asarray(pos_t, dtype=np.float64)
@@ -113,8 +113,8 @@ def _initial_orbital_basis(date: datetime) -> np.ndarray:
     """Base ortonormal 3x3 alineada con el plano orbital inicial Tierra-Luna."""
     catalog = load_bodies()
     stop = date + timedelta(seconds=600)
-    _, e_pos, e_vel = get_body_state_table(catalog["earth"], date, stop, 2)
-    _, m_pos, m_vel = get_body_state_table(catalog["moon"], date, stop, 2)
+    _, e_pos, e_vel = ephemeris.get_body_state_table(catalog["earth"], date, stop, 2)
+    _, m_pos, m_vel = ephemeris.get_body_state_table(catalog["moon"], date, stop, 2)
 
     rel_pos = np.subtract(m_pos[0], e_pos[0])
     rel_vel = np.subtract(m_vel[0], e_vel[0])
@@ -144,7 +144,7 @@ class Scenario:
         self.date = config.date
         self.duration_s = config.duration_s
         self.bodies: dict[str, ScenarioBody] = _build_interpolated_bodies(
-            config.date, config.duration_s, spacing_s, planar=False
+            config.date, config.duration_s, spacing_s, planar=False, body_ids=("earth", "moon")
         )
 
     def get_bodies(self) -> list[ScenarioBody]:
@@ -185,7 +185,7 @@ class SpatialScenario:
 
 
 class PlanarScenario:
-    """Horizons proyectado en el plano orbital inicial, con ejes fijos 2D."""
+    """Modelo planar Tierra-Luna-nave; perturbación solar reservada al solver 3D."""
 
     frame = "earth_moon_barycentric_initial_orbital_plane"
 
@@ -195,7 +195,7 @@ class PlanarScenario:
         duration_s: float,
         *,
         spacing_s: float = 600.0,
-        include_sun: bool = True,
+        include_sun: bool = False,
     ) -> None:
         validate_positive(duration_s, "duration_s")
         validate_positive(spacing_s, "spacing_s")

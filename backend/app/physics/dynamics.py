@@ -24,7 +24,7 @@ def state_derivative(
     """Devuelve (dr/dt, dv/dt) = (velocidad, aceleración gravitatoria)."""
     bodies = scenario.get_bodies()
     body_positions_m = {
-        body.id: body.pos(t_s) for body in bodies
+        body.id: get_body_position_m(scenario, body, t_s) for body in bodies
     }
     acceleration = gravitational_acceleration(
         state.position_m, body_positions_m, bodies
@@ -52,4 +52,13 @@ def state_derivative_array(
         ax += dx * inv_dist3
         ay += dy * inv_dist3
         az += dz * inv_dist3
+        if body.id == "sun":
+            # Horizons CENTER=500@3: el baricentro Tierra-Luna no es inercial.
+            # Se resta la aceleración solar del origen del marco (término indirecto).
+            norm_b_sq = bx * bx + by * by + bz * bz
+            if norm_b_sq > 0.0:
+                indirect = body.mu_m3_s2 / (norm_b_sq * np.sqrt(norm_b_sq))
+                ax -= bx * indirect
+                ay -= by * indirect
+                az -= bz * indirect
     return np.array((y[3], y[4], y[5], ax, ay, az), dtype=np.float64)

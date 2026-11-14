@@ -66,9 +66,9 @@ def solve_shooting(
         initial,
         method="lm" if planar else "trf",
         max_nfev=max_evaluations,
-        xtol=1e-13,
-        ftol=1e-13,
-        gtol=1e-13,
+        xtol=1e-9,
+        ftol=1e-9,
+        gtol=1e-9,
     )
 
     velocity = tuple(float(value * velocity_scale_m_s) for value in optimization.x)

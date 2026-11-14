@@ -554,6 +554,30 @@
     color: #9fb3cc
 }
 
+.sun-compass {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid rgba(255, 200, 87, .4);
+    border-radius: 999px;
+    background: rgba(10, 18, 34, .84);
+    color: #ffe29a;
+    font-size: 12px;
+    pointer-events: none;
+}
+
+.sun-compass-arrow {
+    display: inline-block;
+    font-size: 21px;
+    line-height: 1;
+    transform-origin: center;
+}
+
 .transfer-view {
     position: relative;
     flex: 1;

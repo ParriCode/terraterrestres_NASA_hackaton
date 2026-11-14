@@ -18,6 +18,14 @@ export default function App() {
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(21600)
   const pending = useRef<AbortController | null>(null)
+  const timeRef = useRef(0)
+
+  useEffect(() => () => { pending.current?.abort() }, [])
+
+  function seek(t: number) {
+    timeRef.current = t
+    setTime(t)
+  }
 
   const transfer = result?.status === 'ok' ? result : null
   const noFeasible = result?.status === 'no_feasible_solution' ? result : null
@@ -32,11 +40,10 @@ export default function App() {
     const tick = (now: number) => {
       const dt = (now - last) / 1000
       last = now
-      setTime(t => {
-        const next = t + dt * speed
-        if (next >= duration) { setPlaying(false); return duration }
-        return next
-      })
+      const next = Math.min(duration, timeRef.current + dt * speed)
+      timeRef.current = next
+      setTime(next)
+      if (next >= duration) { setPlaying(false); return }
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
@@ -47,13 +54,14 @@ export default function App() {
     pending.current?.abort()
     const controller = new AbortController()
     pending.current = controller
-    setBusy(true); setError(''); setPlaying(false)
+    setBusy(true); setError(''); setPlaying(false); setResult(null); seek(0)
     try {
       const response =
         mission.kind === 'one_way'
           ? await requestOptimizedTransfer(mission.payload, controller.signal)
           : await requestRoundTripTransfer(mission.payload, controller.signal)
-      setResult(response); setTime(0)
+      if (pending.current !== controller) return
+      setResult(response); seek(0)
     } catch (e) {
       if (controller.signal.aborted) return
       setError(e instanceof ApiError || e instanceof Error ? e.message : 'Error desconocido al calcular la misión.')
@@ -64,7 +72,7 @@ export default function App() {
 
   function cancel() { pending.current?.abort(); pending.current = null; setBusy(false) }
   function toggle() {
-    if (!playing && time >= duration) setTime(0)
+    if (!playing && time >= duration) seek(0)
     setPlaying(p => !p)
   }
 
@@ -98,8 +106,8 @@ export default function App() {
         {transfer && state ? <>
           <TransferView transfer={transfer} state={state} />
           <PlaybackControls start={new Date(transfer.date)} duration={duration} time={time} playing={playing} speed={speed}
-            onToggle={toggle} onReset={() => { setPlaying(false); setTime(0) }}
-            onTime={t => { setPlaying(false); setTime(t) }} onSpeed={setSpeed} />
+            onToggle={toggle} onReset={() => { setPlaying(false); seek(0) }}
+            onTime={t => { setPlaying(false); seek(t) }} onSpeed={setSpeed} />
         </> : noFeasible ? <div className="stage-empty no-feasible-stage">
           <Icon name="alert" size={40} />
           <p>No existe trayectoria validada dentro del tiempo máximo especificado.</p>

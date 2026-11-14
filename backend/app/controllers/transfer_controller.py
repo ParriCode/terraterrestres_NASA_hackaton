@@ -1,8 +1,12 @@
 """API del cálculo de transferencias reales (ida y retorno Tierra–Luna–Tierra)."""
 
-from typing import Literal
+from typing import Iterator, Literal
+from threading import BoundedSemaphore
+import os
 
-from fastapi import APIRouter, HTTPException
+import numpy as np
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
 from app.data.ephemeris import EphemerisError
@@ -11,11 +15,31 @@ from app.services.mission_optimizer import (
     DEFAULT_PARKING_ALT_M,
     NoFeasibleTransfer,
     optimize_transfer,
+    optimize_round_trip_transfer,
 )
 from app.services.propulsion import estimate_propellant
 from app.services.transfer_service import TransferNotFoundError, design_transfer
+from app.transfer_schemas import OptimizedResponse, RoundTripResponse, TransferResponse
 
 router = APIRouter(prefix="/transfers", tags=["Transferencias"])
+
+# Un request CPU-intensivo ya se ejecuta en un worker por ser endpoint `def`.
+# Este semáforo evita lanzar demasiados solvers simultáneos en un proceso.
+_SOLVER_SLOTS = BoundedSemaphore(max(1, int(os.getenv("ORBITAL_MAX_CONCURRENT_SOLVERS", "2"))))
+
+
+def _solver_slot() -> Iterator[None]:
+    if not _SOLVER_SLOTS.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "solver_busy", "message": "El optimizador está ocupado. Inténtalo de nuevo."},
+            headers={"Retry-After": "5"},
+        )
+    try:
+        yield
+    finally:
+        _SOLVER_SLOTS.release()
+
 
 
 class TransferRequest(BaseModel):
@@ -76,14 +100,68 @@ class RoundTripTransferRequest(BaseModel):
         return self
 
 
-def _sample_times(duration_s: float, count: int):
-    for i in range(count):
-        if i == 0:
-            yield 0.0
-        elif i == count - 1:
-            yield float(duration_s)
+def _time_grid(trajectory, duration_s: float, count: int) -> np.ndarray:
+    """Mallas con nodos de maniobra sin cambiar el número de muestras solicitado."""
+    segments = getattr(trajectory, "_segments", ())
+    boundaries = sorted({float(start) for start, _, _ in segments[1:]
+                         if 0 < start < duration_s})
+    if not boundaries or count < 2 * len(boundaries) + 4:
+        return np.linspace(0.0, duration_s, count, dtype=np.float64)
+    # Dos nodos contiguos por impulso: permite mostrar velocidades pre/post
+    # LOI/TEI sin que Hermite interpole el salto durante miles de segundos.
+    marks = [0.0, duration_s]
+    for t in boundaries:
+        marks.extend((max(0.0, t - 0.05), t))
+    mandatory = np.unique(np.asarray(marks, dtype=np.float64))
+    inner = np.linspace(0.0, duration_s, count - len(mandatory) + 2)[1:-1]
+    ts = np.unique(np.concatenate((mandatory, inner)))
+    while len(ts) < count:
+        gaps = np.diff(ts)
+        i = int(np.argmax(gaps))
+        ts = np.insert(ts, i + 1, (ts[i] + ts[i + 1]) / 2)
+    return ts
+
+
+def _serialize_samples(trajectory, duration_s: float, count: int) -> list[dict]:
+    """Muestreo vectorizado de las soluciones densas y de splines de Horizons."""
+    ts = _time_grid(trajectory, duration_s, count)
+    if hasattr(trajectory, "_segments"):
+        # Los cambios de velocidad en LOI/TEI son impulsos: el lado derecho
+        # del salto prevalece en el instante de la maniobra.
+        states = np.empty((count, 6), dtype=np.float64)
+        for start, end, solution in trajectory._segments:
+            mask = (ts >= start) & (ts <= end)
+            if np.any(mask):
+                states[mask] = solution.sol(ts[mask]).T
+    else:
+        planar = np.asarray(trajectory._solution.sol(ts), dtype=np.float64).T
+        states = np.zeros((count, 6), dtype=np.float64)
+        states[:, :2] = planar[:, :2]
+        states[:, 3:5] = planar[:, 2:4]
+
+    body_pos = {}
+    for key, body in trajectory.scenario.bodies.items():
+        motion = getattr(body, "_motion", None)
+        if callable(motion):
+            values = np.asarray(motion(ts), dtype=np.float64)
+            if values.shape[1] == 2:
+                values = np.column_stack((values, np.zeros(count)))
         else:
-            yield float(duration_s * i / (count - 1))
+            values = np.asarray([body.pos(float(t)) for t in ts], dtype=np.float64)
+        body_pos[key] = values
+    return [
+        {
+            "t_s": float(t),
+            "position_m": states[i, :3].tolist(),
+            "velocity_m_s": states[i, 3:].tolist(),
+            "body_positions_m": {key: arr[i].tolist() for key, arr in body_pos.items()},
+        }
+        for i, t in enumerate(ts)
+    ]
+
+
+def _domain_exception(status: int, code: str, exc: Exception) -> HTTPException:
+    return HTTPException(status_code=status, detail={"code": code, "message": str(exc)})
 
 
 def _serialize_tradeoff(tradeoff):
@@ -112,7 +190,7 @@ def _propellant_dict(initial_mass_kg: float | None, isp_s: float | None, total_d
     }
 
 
-@router.post("")
+@router.post("", response_model=TransferResponse, dependencies=[Depends(_solver_slot)])
 def transfer(request: TransferRequest):
     """Calcula transferencia Tierra → Luna con Horizons."""
     try:
@@ -125,9 +203,13 @@ def transfer(request: TransferRequest):
             mass_kg=request.mass_kg,
         )
     except EphemerisError as error:
-        raise HTTPException(502, str(error)) from error
-    except (TransferNotFoundError, ValueError) as error:
-        raise HTTPException(422, str(error)) from error
+        raise _domain_exception(502, "ephemeris_unavailable", error) from error
+    except TransferNotFoundError as error:
+        raise _domain_exception(422, "transfer_not_found", error) from error
+    except ValueError as error:
+        raise _domain_exception(422, "invalid_transfer", error) from error
+    except (RuntimeError, ArithmeticError) as error:
+        raise _domain_exception(503, "solver_failed", error) from error
 
     frame = getattr(result.scenario, "frame", REFERENCE_FRAME)
     return {
@@ -147,21 +229,11 @@ def transfer(request: TransferRequest):
             key: {"name": body.name, "radius_m": body.radius_m}
             for key, body in result.scenario.bodies.items()
         },
-        "samples": [
-            {
-                "t_s": t,
-                "position_m": result.pos(t),
-                "velocity_m_s": result.speed(t),
-                "body_positions_m": {
-                    key: body.pos(t) for key, body in result.scenario.bodies.items()
-                },
-            }
-            for t in _sample_times(request.duration_s, request.samples)
-        ],
+        "samples": _serialize_samples(result, request.duration_s, request.samples),
     }
 
 
-@router.post("/optimize")
+@router.post("/optimize", response_model=OptimizedResponse, dependencies=[Depends(_solver_slot)])
 def optimize(request: OptimizeTransferRequest):
     """Optimiza Δv total Tierra→Luna sujeto a tiempo máximo de vuelo."""
     mass_kg = request.initial_mass_kg if request.initial_mass_kg is not None else 1.0
@@ -173,7 +245,7 @@ def optimize(request: OptimizeTransferRequest):
             mass_kg=mass_kg,
         )
     except EphemerisError as error:
-        raise HTTPException(502, str(error)) from error
+        raise _domain_exception(502, "ephemeris_unavailable", error) from error
     except NoFeasibleTransfer as error:
         return {
             "status": "no_feasible_solution",
@@ -186,7 +258,9 @@ def optimize(request: OptimizeTransferRequest):
             "tradeoff": _serialize_tradeoff(error.tradeoff),
         }
     except ValueError as error:
-        raise HTTPException(422, str(error)) from error
+        raise _domain_exception(422, "invalid_transfer", error) from error
+    except (RuntimeError, ArithmeticError) as error:
+        raise _domain_exception(503, "solver_failed", error) from error
 
     result = opt.transfer
     frame = getattr(result.scenario, "frame", REFERENCE_FRAME)
@@ -221,35 +295,16 @@ def optimize(request: OptimizeTransferRequest):
             key: {"name": body.name, "radius_m": body.radius_m}
             for key, body in result.scenario.bodies.items()
         },
-        "samples": [
-            {
-                "t_s": t,
-                "position_m": result.pos(t),
-                "velocity_m_s": result.speed(t),
-                "body_positions_m": {
-                    key: body.pos(t) for key, body in result.scenario.bodies.items()
-                },
-            }
-            for t in _sample_times(result.t1_s, request.samples)
-        ],
+        "samples": _serialize_samples(result, result.t1_s, request.samples),
     }
 
 
-@router.post("/round-trip")
+@router.post("/round-trip", response_model=RoundTripResponse, dependencies=[Depends(_solver_slot)])
 def round_trip(request: RoundTripTransferRequest):
     """Calcula trayectoria completa Tierra → Luna → Tierra (retorno libre u órbita lunar)."""
-    from app.services import mission_optimizer
-
-    solver = getattr(mission_optimizer, "optimize_round_trip_transfer", None)
-    if solver is None:
-        raise HTTPException(
-            501,
-            "Pendiente de conectar optimize_round_trip_transfer en mission_optimizer.py.",
-        )
-
     mass_kg = request.initial_mass_kg if request.initial_mass_kg is not None else 1.0
     try:
-        rt = solver(
+        rt = optimize_round_trip_transfer(
             request.date,
             mode=request.mode,
             max_total_duration_s=request.max_total_duration_s,
@@ -260,17 +315,20 @@ def round_trip(request: RoundTripTransferRequest):
             mass_kg=mass_kg,
         )
     except EphemerisError as error:
-        raise HTTPException(502, str(error)) from error
+        raise _domain_exception(502, "ephemeris_unavailable", error) from error
     except NoFeasibleTransfer as error:
         return {
             "status": "no_feasible_solution",
             "source": "NASA/JPL Horizons",
             "mode": request.mode,
             "date": request.date,
+            "max_total_duration_s": request.max_total_duration_s,
             "reasons": error.reasons,
         }
     except ValueError as error:
-        raise HTTPException(422, str(error)) from error
+        raise _domain_exception(422, "invalid_transfer", error) from error
+    except (RuntimeError, ArithmeticError) as error:
+        raise _domain_exception(503, "solver_failed", error) from error
 
     frame = getattr(rt.scenario, "frame", REFERENCE_FRAME)
     return {
@@ -297,15 +355,5 @@ def round_trip(request: RoundTripTransferRequest):
             key: {"name": body.name, "radius_m": body.radius_m}
             for key, body in rt.scenario.bodies.items()
         },
-        "samples": [
-            {
-                "t_s": t,
-                "position_m": rt.pos(t),
-                "velocity_m_s": rt.speed(t),
-                "body_positions_m": {
-                    key: body.pos(t) for key, body in rt.scenario.bodies.items()
-                },
-            }
-            for t in _sample_times(rt.total_duration_s, request.samples)
-        ],
+        "samples": _serialize_samples(rt, rt.total_duration_s, request.samples),
     }

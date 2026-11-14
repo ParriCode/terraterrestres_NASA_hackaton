@@ -30,6 +30,7 @@ type ValidationItem = { loc?: unknown[]; msg?: string }
 
 function describeDetail(detail: unknown): string {
   if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) return detail.map(e => (e as ValidationItem).msg).join(' · ')
   if (detail && typeof detail === 'object') {
     const d = detail as { message?: string; errors?: ValidationItem[] }
     const items = Array.isArray(d.errors)
@@ -37,7 +38,6 @@ function describeDetail(detail: unknown): string {
       : []
     return [d.message, ...items].filter(Boolean).join(' · ') || JSON.stringify(detail)
   }
-  if (Array.isArray(detail)) return detail.map(e => (e as ValidationItem).msg).join(' · ')
   return ''
 }
 
@@ -55,15 +55,18 @@ function isValidSamples(s: unknown): s is TransferSample[] {
   return (
     Array.isArray(s) &&
     s.length >= 2 &&
+    s[0] != null &&
     s[0].t_s === 0 &&
     s.every(
       (p, i) =>
+        p != null &&
         isNum(p.t_s) &&
         (i === 0 || p.t_s > s[i - 1].t_s) &&
         isVec3(p.position_m) &&
         isVec3(p.velocity_m_s) &&
         isVec3(p.body_positions_m?.earth) &&
-        isVec3(p.body_positions_m?.moon),
+        isVec3(p.body_positions_m?.moon) &&
+        (p.body_positions_m?.sun === undefined || isVec3(p.body_positions_m.sun)),
     )
   )
 }
@@ -172,6 +175,7 @@ function isRoundTripNoFeasibleResponse(
     (r.mode === 'free_return' || r.mode === 'lunar_orbit') &&
     typeof r.date === 'string' &&
     Number.isFinite(Date.parse(r.date)) &&
+    isNum(r.max_total_duration_s) &&
     Array.isArray(r.reasons) &&
     r.reasons.every(item => typeof item === 'string')
   )
@@ -231,7 +235,7 @@ export async function requestRoundTripTransfer(
   const data = await postJson('/transfers/round-trip', body, signal)
   if (isRoundTripOkResponse(data)) return { ...data, kind: 'round_trip' }
   if (isRoundTripNoFeasibleResponse(data)) {
-    return { ...data, kind: 'round_trip', max_total_duration_s: body.max_total_duration_s }
+    return { ...data, kind: 'round_trip' }
   }
   throw new ApiError(0, 'El backend respondió con un formato distinto al esperado para /transfers/round-trip.')
 }

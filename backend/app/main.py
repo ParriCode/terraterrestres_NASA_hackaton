@@ -41,11 +41,11 @@ def create_app(
         )
 
     app = FastAPI(
-        title="ORBITAL 4B — Backend de Rafa",
+        title="ORBITAL 4B — API de simulación cislunar",
         version="0.1.0",
         description=(
-            f"Modo actual: {mode}. En modo mock se devuelven DATOS FICTICIOS para React. "
-            "El motor orbital real se conectará mediante adaptadores."
+            f"Modo de simulación v1: {mode}. Las rutas /transfers usan efemérides "
+            "NASA/JPL Horizons y los optimizadores numéricos reales."
         ),
     )
     app.state.simulation_mode = mode
@@ -54,7 +54,8 @@ def create_app(
     @app.middleware("http")
     async def identify_simulation_mode(request: Request, call_next):
         response = await call_next(request)
-        effective_mode = "real" if request.url.path.rstrip("/") == "/transfers" else mode
+        path = request.url.path.rstrip("/")
+        effective_mode = "real" if path == "/transfers" or path.startswith("/transfers/") else mode
         response.headers["X-Simulation-Mode"] = effective_mode
         if effective_mode == "mock":
             response.headers["X-Simulation-Warning"] = MOCK_WARNING

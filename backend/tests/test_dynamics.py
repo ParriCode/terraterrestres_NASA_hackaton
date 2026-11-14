@@ -17,7 +17,14 @@ def initial_state():
 
 
 def make_scenario(monkeypatch, body, state):
+    import numpy as np
     monkeypatch.setattr('app.data.scenarios.load_bodies', lambda: {body.id: body})
+    def ephemeris_table(_body, _start, _stop, intervals):
+        times = np.linspace(0.0, 60.0, intervals + 1)
+        positions = np.zeros((intervals + 1, 3))
+        velocities = np.zeros_like(positions)
+        return times, positions, velocities
+    monkeypatch.setattr('app.data.scenarios.ephemeris.get_body_state_table', ephemeris_table)
     return Scenario(SimulationConfig('demo', state, 60., 1., datetime(2026, 11, 14, tzinfo=timezone.utc)))
 
 
@@ -25,9 +32,9 @@ def test_state_derivative_returns_velocity_and_gravity(monkeypatch, earth_like_b
     scenario = make_scenario(monkeypatch, earth_like_body, initial_state)
     calls = []
     def position(body, instant):
-        calls.append((body.id, (instant - scenario.config.date).total_seconds()))
+        calls.append((body.id, instant))
         return (0., 0., 0.)
-    monkeypatch.setattr('app.data.scenarios.get_body_time_pos', position)
+    monkeypatch.setattr(scenario, 'get_body_pos', position)
 
     position_derivative, velocity_derivative = state_derivative(
         t_s=12.0,
@@ -48,7 +55,7 @@ def test_state_derivative_uses_body_ids_as_position_dictionary_keys(monkeypatch,
         velocity_m_s=(1.0, 2.0, 3.0),
     )
     scenario = make_scenario(monkeypatch, earth_like_body, state)
-    monkeypatch.setattr('app.data.scenarios.get_body_time_pos', lambda *args: (0., 0., 0.))
+    monkeypatch.setattr(scenario, 'get_body_pos', lambda *args: (0., 0., 0.))
 
     _, acceleration = state_derivative(
         3.0, state, scenario
