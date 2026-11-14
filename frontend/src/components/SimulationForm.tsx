@@ -61,7 +61,6 @@ export default function SimulationForm({ open, busy, onClose, onDemo, onBackend 
         },
       },
     }
-    }
   }
   function submit(kind: 'demo' | 'backend') {
     const data = prepare(); if (!data) return
