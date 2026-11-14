@@ -28,11 +28,14 @@ def gravitational_acceleration(
     spacecraft_position_m: Vec3,
     body_positions_m: dict[str, Vec3],
     bodies: Sequence[GravitatingBody],
+    *,
+    check_surface: bool = True,
 ) -> Vec3:
     """Calcula -sum(mu * (r-r_i) / |r-r_i|**3).
 
-    La nave no puede estar dentro de los radios fisicos. Este control protege
-    la dinamica, pero la deteccion del impacto corresponde a events/rk2.
+    Por defecto la nave no puede estar dentro de los radios fisicos. Shooting
+    puede desactivar check_surface para evaluar candidatas provisionales;
+    la validación de colisiones se hace después de resolver el contorno.
     """
     if len(spacecraft_position_m) != 3 or not all(
         math.isfinite(value) for value in spacecraft_position_m
@@ -63,7 +66,7 @@ def gravitational_acceleration(
             raise GravityError(f"Invalid distance to {body.id}")
 
         distance = math.sqrt(distance_sq)
-        if distance < body.radius_m:
+        if check_surface and distance < body.radius_m:
             raise GravityError(f"Spacecraft inside {body.id}")
 
         factor = -body.mu_m3_s2 / (distance_sq * distance)

@@ -1,48 +1,19 @@
-/**
- * Iconos oficiales de Font Awesome Free. No hay trazos SVG inventados
- * Se conserva la interfaz <Icon name="..." /> para no tener que editar todos los componentes que ya consumen este archivo
- */
+/** Iconos de Font Awesome Free con la interfaz <Icon name="..." />. */
 import type { CSSProperties } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import {
-  faBars, faXmark, faPlus, faMinus, faCrosshairs, faEye,
-  faEyeSlash, faTrashCan, faPlay, faPause, faRotateLeft,
-  faChevronLeft, faArrowRight, faRocket, faClock, faCalendarDays,
-  faDownload, faCircleInfo, faEarthAmericas, faLayerGroup, faGear,
-  faCheck, faTriangleExclamation, faSatellite, faBullseye,
+  faXmark, faPlus, faMinus, faCrosshairs, faPlay, faPause, faRotateLeft, faRocket, faClock,
+  faEarthAmericas, faLayerGroup, faTriangleExclamation, faSatellite, faBullseye,
 } from '@fortawesome/free-solid-svg-icons'
 
-type IconName = 'menu' | 'x' | 'plus' | 'minus' | 'crosshair' | 'eye' | 'eye-off' | 'trash' | 'play' | 'pause' | 'rotate' | 'chevron-left' | 'arrow-right' | 'rocket' | 'clock' | 'calendar' | 'download' | 'info' | 'globe' | 'layers' | 'settings' | 'check' | 'alert' | 'orbit' | 'target'
-type Props = { name: IconName; size?: number; className?: string; style?: CSSProperties }
+const ICONS = {
+  x: faXmark, plus: faPlus, minus: faMinus, crosshair: faCrosshairs, play: faPlay, pause: faPause,
+  rotate: faRotateLeft, rocket: faRocket, clock: faClock, globe: faEarthAmericas, layers: faLayerGroup,
+  alert: faTriangleExclamation, orbit: faSatellite, target: faBullseye,
+} satisfies Record<string, IconDefinition>
 
-const ICONS: Record<IconName, IconDefinition> = {
-  menu: faBars,
-  x: faXmark,
-  plus: faPlus,
-  minus: faMinus,
-  crosshair: faCrosshairs,
-  eye: faEye,
-  'eye-off': faEyeSlash,
-  trash: faTrashCan,
-  play: faPlay,
-  pause: faPause,
-  rotate: faRotateLeft,
-  'chevron-left': faChevronLeft,
-  'arrow-right': faArrowRight,
-  rocket: faRocket,
-  clock: faClock,
-  calendar: faCalendarDays,
-  download: faDownload,
-  info: faCircleInfo,
-  globe: faEarthAmericas,
-  layers: faLayerGroup,
-  settings: faGear,
-  check: faCheck,
-  alert: faTriangleExclamation,
-  orbit: faSatellite,
-  target: faBullseye,
-}
+type Props = { name: keyof typeof ICONS; size?: number; className?: string; style?: CSSProperties }
 
 export default function Icon({ name, size = 18, className, style }: Props) {
   return <FontAwesomeIcon icon={ICONS[name]} className={className} aria-hidden="true"
