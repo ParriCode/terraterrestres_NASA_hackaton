@@ -65,7 +65,7 @@ export function downloadJourney(journey: Journey) {
   const blob = new Blob([JSON.stringify({
     origin: journey.source, launch_iso: journey.launch_iso,
     route_kind: journey.route_kind ?? 'earth_moon', optimization_goal: journey.optimization_goal,
-    min_flyby_altitude_km: journey.min_flyby_altitude_km, result: journey.result
+    min_flyby_altitude_km: journey.min_flyby_altitude_km, science: journey.science, result: journey.result
   }, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a'); anchor.href = url

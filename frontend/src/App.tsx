@@ -92,7 +92,7 @@ export default function App() {
     const journey: Journey = {
       id: crypto.randomUUID(), name: data.name, color, visible: true, source,
       launch_iso: data.launch_iso, route_kind: data.route_kind, optimization_goal: data.optimization_goal,
-      min_flyby_altitude_km: data.min_flyby_altitude_km, result
+      min_flyby_altitude_km: data.min_flyby_altitude_km, science: data.science, result
     }
     setJourneys(old => [...old, journey])
     setSelectedId(journey.id)

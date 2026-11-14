@@ -1,10 +1,13 @@
 import { useState } from 'react'
 import type { JourneyRouteKind, OptimizationGoal, SimulationConfig } from '../types/simulation'
 import Icon from './Icon'
+import SciencePayloadSelector from './SciencePayloadSelector'
+import { DEFAULT_SCIENCE_DESIGN, calculateScienceBudget } from '../science/catalog'
+import type { ScienceDesign } from '../science/catalog'
 
 export type NewJourneyForm = {
   name: string; launch_iso: string; config: SimulationConfig;
-  route_kind: JourneyRouteKind; optimization_goal: OptimizationGoal; min_flyby_altitude_km: number
+  route_kind: JourneyRouteKind; optimization_goal: OptimizationGoal; min_flyby_altitude_km: number; science: ScienceDesign
 }
 type Props = { open: boolean; busy: boolean; onClose: () => void; onDemo: (data: NewJourneyForm) => void; onBackend: (data: NewJourneyForm) => void }
 function toLocal(date: Date) { const pad = (v: number) => String(v).padStart(2, '0'); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}` }
@@ -19,6 +22,7 @@ export default function SimulationForm({ open, busy, onClose, onDemo, onBackend 
   const [step, setStep] = useState(900)
   const [position, setPosition] = useState<[number, number, number]>([2_001_000, 0, 0])
   const [velocity, setVelocity] = useState<[number, number, number]>([0, 10_800, 0])
+  const [science, setScience] = useState<ScienceDesign>(() => ({ ...DEFAULT_SCIENCE_DESIGN, instrument_ids: [...DEFAULT_SCIENCE_DESIGN.instrument_ids] }))
   const [error, setError] = useState('')
   if (!open) return null
 
@@ -31,11 +35,14 @@ export default function SimulationForm({ open, busy, onClose, onDemo, onBackend 
     if (routeKind === 'lunar_free_return' && (!Number.isFinite(minAltitudeKm) || minAltitudeKm < 100 || minAltitudeKm > 20000)) {
       setError('La altitud mínima propuesta debe estar entre 100 y 20.000 km.'); return null
     }
+    if (!calculateScienceBudget(science, durationH * 3600).goal_has_required_instrument) { setError('Selecciona el instrumento necesario para el objetivo científico.'); return null }
     if (![...position, ...velocity].every(Number.isFinite)) { setError('Las posiciones y velocidades deben ser números finitos.'); return null }
     setError('')
+    const launchIso = date.toISOString()
     return {
-      name: name.trim(), launch_iso: date.toISOString(), route_kind: routeKind,
-      optimization_goal: optimizationGoal, min_flyby_altitude_km: minAltitudeKm, config: {
+      name: name.trim(), launch_iso: launchIso, route_kind: routeKind,
+      optimization_goal: optimizationGoal, min_flyby_altitude_km: minAltitudeKm, science: { ...science, instrument_ids: [...science.instrument_ids] }, config: {
+        date: launchIso,
         scenario_id: 'earth_moon_circular_v1', duration_s: durationH * 3600, step_s: step,
         initial_state: { position_m: position, velocity_m_s: velocity },
       }
@@ -90,6 +97,7 @@ export default function SimulationForm({ open, busy, onClose, onDemo, onBackend 
           <label className="field"><span>Paso RK2 (segundos)</span><input type="number" min="1" step="1" value={step} onChange={e => setStep(Number(e.target.value))} /></label>
           <label className="field"><span>Escenario</span><input value="earth_moon_circular_v1" readOnly /></label>
         </div>
+        <SciencePayloadSelector design={science} duration_s={durationH * 3600} onChange={setScience} />
         <details className="advanced-fields"><summary><Icon name="settings" size={16} />Estado inicial avanzado <span>metros · m/s</span></summary>
           <p>Estas coordenadas son valores de ejemplo. Deben ajustarse al escenario definido por Parri.</p>
           <div className="vector-header">Posición inicial (m)</div>

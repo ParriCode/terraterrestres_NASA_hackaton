@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react'
 import type { Journey } from '../types/simulation'
 import { elapsedAt, formatDuration, journeyProgress, shortDate } from '../utils/trajectory'
 import Icon from './Icon'
+import { calculateScienceBudget, scienceGoalName } from '../science/catalog'
 
 type Props = {
   open: boolean; journeys: Journey[]; selectedId: string | null; date: Date;
@@ -33,6 +34,7 @@ export default function JourneyDrawer({ open, journeys, selectedId, date, onClos
                 <span className={`source-chip ${j.source === 'demo' ? 'demo' : ''}`}>{j.source === 'demo' ? 'DEMO' : 'PYTHON'}</span></div>
               <div className="journey-route"><span>Tierra</span><Icon name="arrow-right" size={13} /><span>Luna</span>{j.route_kind === 'lunar_free_return' && <><Icon name="arrow-right" size={13} /><span>Tierra</span></>}</div>
               {j.route_kind === 'lunar_free_return' && <div className="journey-subtype">Retorno libre lunar · {j.source === 'demo' ? 'demostración visual' : 'datos de Python'}</div>}
+              {j.science && <div className="journey-science-tag"><Icon name="target" size={12} />{scienceGoalName(j.science.goal_id)} · +{calculateScienceBudget(j.science, j.result.config.duration_s).mass_kg} kg de carga</div>}
               <div className="journey-track"><span style={{ width: `${progress * 100}%` }} /></div>
               <div className="journey-card-meta"><span><Icon name="clock" size={13} />{before ? 'Pendiente' : after ? 'Finalizado' : formatDuration(elapsedAt(j, date))}</span>
                 <span>{Math.round(progress * 100)} %</span></div>
