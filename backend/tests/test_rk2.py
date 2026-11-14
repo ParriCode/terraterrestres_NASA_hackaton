@@ -24,7 +24,7 @@ def test_rk2_midpoint_step(monkeypatch):
     """Con derivada v'=a constante, RK2 devuelve el avance esperado."""
     calls = []
 
-    def fake_derivative(t_s, state, scenario, bodies):
+    def fake_derivative(t_s, state, scenario):
         calls.append(t_s)
         return state.velocity_m_s, (0.0, 2.0, 0.0)
 
@@ -48,7 +48,7 @@ def test_rk2_midpoint_step(monkeypatch):
 def test_rk2_queries_derivative_at_start_and_midpoint(monkeypatch):
     times = []
 
-    def fake_derivative(t_s, state, scenario, bodies):
+    def fake_derivative(t_s, state, scenario):
         times.append(t_s)
         return (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
 
@@ -68,27 +68,26 @@ def test_rk2_rejects_invalid_step(step_s):
         rk2_step(0.0, state, step_s, FakeScenario())
 
 
-def test_rk2_queries_moving_body_at_start_and_midpoint(earth_like_body):
+def test_rk2_queries_moving_body_at_start_and_midpoint(monkeypatch, earth_like_body):
     """La dinámica debe consultar el escenario en ambos instantes de RK2."""
-    class MovingBodyScenario:
-        bodies = {"earth": earth_like_body}
-
-        def __init__(self):
-            self.times = []
-
-        def get_body_pos(self, body, time_s):
-            self.times.append(time_s)
-            # El cuerpo se desplaza para verificar que cada instante se consulta.
-            return (time_s, 0.0, 0.0)
-
-    scenario = MovingBodyScenario()
+    from datetime import datetime, timezone
+    from app.data.scenarios import Scenario
+    from app.models.domain import SimulationConfig
     state = SpacecraftState(
         position_m=(10.0, 0.0, 0.0),
         velocity_m_s=(0.0, 1.0, 0.0),
     )
+    monkeypatch.setattr('app.data.scenarios.load_bodies', lambda: {'earth': earth_like_body})
+    scenario = Scenario(SimulationConfig('demo', state, 60., 4., datetime(2026,11,14,tzinfo=timezone.utc)))
+    times = []
+    def position(body, instant):
+        t = (instant - scenario.config.date).total_seconds()
+        times.append(t)
+        return (t, 0., 0.)
+    monkeypatch.setattr('app.data.scenarios.get_body_time_pos', position)
 
     result = rk2_step(5.0, state, 4.0, scenario)
 
-    assert scenario.times == [5.0, 7.0]
+    assert times == [5.0, 7.0]
     assert all(math.isfinite(value) for value in result.position_m)
     assert all(math.isfinite(value) for value in result.velocity_m_s)

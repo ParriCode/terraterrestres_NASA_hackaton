@@ -1,7 +1,22 @@
 """Aceleración gravitatoria."""
 
 import math
-from app.models.domain import CelestialBody, SpacecraftState, Vec3
+from collections.abc import Sequence
+from typing import Protocol
+from app.models.domain import Vec3
+
+
+class GravitatingBody(Protocol):
+    """Propiedades que necesita la gravedad, sin depender del proveedor orbital."""
+
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def mu_m3_s2(self) -> float: ...
+
+    @property
+    def radius_m(self) -> float: ...
 
 class GravityError(ValueError):
     """Error al calcular la aceleración gravitatoria."""
@@ -17,7 +32,7 @@ class GravityError(ValueError):
 def gravitational_acceleration(
     spacecraft_position_m: Vec3,
     body_positions_m: dict[str, Vec3],
-    bodies: list[CelestialBody],
+    bodies: Sequence[GravitatingBody],
 ) -> Vec3:
     ax = ay = az = 0.0
 
