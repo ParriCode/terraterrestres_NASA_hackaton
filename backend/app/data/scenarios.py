@@ -1,16 +1,40 @@
-"""Escenarios iniciales de simulación."""
+"""Escenarios de simulación 2D y 3D respaldados por splines de efemérides."""
+
 from datetime import datetime, timedelta
+import math
+
+import numpy as np
+from scipy.interpolate import CubicHermiteSpline
 
 from app.data.bodies import load_bodies
-from app.data.ephemeris import get_body_time_pos, get_body_time_velocity
-from app.models.domain import CelestialBody, SimulationConfig, Vec3, validate_non_negative
+from app.data.ephemeris import get_body_state_table
+from app.models.domain import (
+    CelestialBody,
+    SimulationConfig,
+    Vec3,
+    validate_non_negative,
+    validate_positive,
+)
+
 
 class ScenarioBody:
-    """Cuerpo y movimiento relativo a la fecha inicial de un escenario."""
+    """Cuerpo celeste con trayectoria continua interpolada en el escenario."""
 
-    def __init__(self, body: CelestialBody, date: datetime) -> None:
+    def __init__(
+        self,
+        body: CelestialBody,
+        date: datetime,
+        times: np.ndarray,
+        positions: np.ndarray,
+        velocities: np.ndarray,
+        *,
+        planar: bool = False,
+    ) -> None:
         self._body = body
         self.date = date
+        self._planar = planar
+        self._motion = CubicHermiteSpline(times, positions, velocities, extrapolate=False)
+        self.duration_s = float(times[-1])
 
     @property
     def id(self) -> str:
@@ -28,107 +52,164 @@ class ScenarioBody:
     def radius_m(self) -> float:
         return self._body.radius_m
 
-    def _instant(self, time_s: float) -> datetime:
+    def _check_time(self, time_s: float) -> None:
         validate_non_negative(time_s, "time_s")
-        return self.date + timedelta(seconds=time_s)
+        if time_s > self.duration_s:
+            raise ValueError(f"Tiempo {time_s} s fuera de la tabla ({self.duration_s} s).")
 
     def pos(self, time_s: float) -> Vec3:
         """Posición (x, y, z) en metros, time_s segundos desde el inicio."""
-        return get_body_time_pos(self._body, self._instant(time_s))
+        self._check_time(time_s)
+        p = self._motion(time_s)
+        if self._planar:
+            return float(p[0]), float(p[1]), 0.0
+        return float(p[0]), float(p[1]), float(p[2])
+
+    def velocity(self, time_s: float) -> Vec3:
+        """Vector de velocidad (vx, vy, vz) en m/s."""
+        self._check_time(time_s)
+        v = self._motion(time_s, 1)
+        if self._planar:
+            return float(v[0]), float(v[1]), 0.0
+        return float(v[0]), float(v[1]), float(v[2])
 
     def speed(self, time_s: float) -> Vec3:
-        """Vector de velocidad (vx, vy, vz) en m/s, no su magnitud."""
-        return get_body_time_velocity(self._body, self._instant(time_s))
+        """Alias de compatibilidad: devuelve el vector de velocidad (vx, vy, vz) en m/s."""
+        return self.velocity(time_s)
+
+
+def _build_interpolated_bodies(
+    date: datetime,
+    duration_s: float,
+    spacing_s: float,
+    basis: np.ndarray | None = None,
+    planar: bool = False,
+    body_ids: tuple[str, ...] | None = None,
+) -> dict[str, ScenarioBody]:
+    catalog = load_bodies()
+    selected_ids = body_ids if body_ids is not None else tuple(catalog.keys())
+    intervals = max(2, math.ceil(duration_s / spacing_s))
+    stop_date = date + timedelta(seconds=duration_s)
+
+    bodies: dict[str, ScenarioBody] = {}
+    for key in selected_ids:
+        if key not in catalog:
+            continue
+        times_t, pos_t, vel_t = get_body_state_table(catalog[key], date, stop_date, intervals)
+        times = np.asarray(times_t, dtype=np.float64)
+        times[-1] = float(duration_s)
+        pos = np.asarray(pos_t, dtype=np.float64)
+        vel = np.asarray(vel_t, dtype=np.float64)
+        if basis is not None:
+            pos = pos @ basis.T
+            vel = vel @ basis.T
+        bodies[key] = ScenarioBody(
+            catalog[key], date, times, pos, vel, planar=planar
+        )
+    return bodies
+
+
+def _initial_orbital_basis(date: datetime) -> np.ndarray:
+    """Base ortonormal 3x3 alineada con el plano orbital inicial Tierra-Luna."""
+    catalog = load_bodies()
+    stop = date + timedelta(seconds=600)
+    _, e_pos, e_vel = get_body_state_table(catalog["earth"], date, stop, 2)
+    _, m_pos, m_vel = get_body_state_table(catalog["moon"], date, stop, 2)
+
+    rel_pos = np.subtract(m_pos[0], e_pos[0])
+    rel_vel = np.subtract(m_vel[0], e_vel[0])
+    normal = np.cross(rel_pos, rel_vel)
+    norm_val = np.linalg.norm(normal)
+    if norm_val == 0.0:
+        raise ValueError("No se puede definir el plano orbital inicial.")
+    normal /= norm_val
+
+    ref_axis = np.array((1.0, 0.0, 0.0))
+    if abs(float(np.dot(ref_axis, normal))) > 0.99:
+        ref_axis = np.array((0.0, 1.0, 0.0))
+
+    x_axis = ref_axis - np.dot(ref_axis, normal) * normal
+    x_axis /= np.linalg.norm(x_axis)
+    y_axis = np.cross(normal, x_axis)
+    return np.stack((x_axis, y_axis, normal))
 
 
 class Scenario:
-    def __init__(self, config: SimulationConfig) -> None:
+    """Escenario 3D en marco baricéntrico ICRF precargado con splines."""
+
+    frame = "earth_moon_barycentric_inertial"
+
+    def __init__(self, config: SimulationConfig, *, spacing_s: float = 600.0) -> None:
         self.config: SimulationConfig = config
-        self.bodies: dict[str, ScenarioBody] = {
-            body_id: ScenarioBody(body, config.date)
-            for body_id, body in load_bodies().items()
-        }
+        self.date = config.date
+        self.duration_s = config.duration_s
+        self.bodies: dict[str, ScenarioBody] = _build_interpolated_bodies(
+            config.date, config.duration_s, spacing_s, planar=False
+        )
 
     def get_bodies(self) -> list[ScenarioBody]:
         return list(self.bodies.values())
 
+    def get_body_pos(self, body: ScenarioBody, t_s: float) -> Vec3:
+        return body.pos(t_s)
 
-class PlanarScenarioBody(ScenarioBody):
-    """Movimiento 2D interpolado; conserva la interfaz usada por la física."""
 
-    def __init__(self, body, date, times, positions, velocities):
-        from scipy.interpolate import CubicHermiteSpline
+class SpatialScenario:
+    """Escenario 3D completo (Tierra, Luna y Sol) alineado con el plano orbital inicial."""
 
-        super().__init__(body, date)
-        self._motion = CubicHermiteSpline(times, positions, velocities, extrapolate=False)
-        self.duration_s = float(times[-1])
+    frame = "earth_moon_barycentric_orbital_3d"
 
-    def _check_time(self, time_s):
-        validate_non_negative(time_s, "time_s")
-        if time_s > self.duration_s:
-            raise ValueError("Tiempo fuera de la tabla de efemérides.")
+    def __init__(
+        self,
+        date: datetime,
+        duration_s: float,
+        *,
+        spacing_s: float = 600.0,
+        include_sun: bool = True,
+    ) -> None:
+        validate_positive(duration_s, "duration_s")
+        validate_positive(spacing_s, "spacing_s")
+        self.date = date
+        self.duration_s = duration_s
+        self.basis_icrf = _initial_orbital_basis(date)
+        body_ids = ("earth", "moon", "sun") if include_sun else ("earth", "moon")
+        self.bodies = _build_interpolated_bodies(
+            date, duration_s, spacing_s, basis=self.basis_icrf, planar=False, body_ids=body_ids
+        )
 
-    def pos(self, time_s: float) -> Vec3:
-        self._check_time(time_s)
-        p = self._motion(time_s)
-        return float(p[0]), float(p[1]), 0.0
+    def get_bodies(self) -> list[ScenarioBody]:
+        return list(self.bodies.values())
 
-    def speed(self, time_s: float) -> Vec3:
-        self._check_time(time_s)
-        v = self._motion(time_s, 1)
-        return float(v[0]), float(v[1]), 0.0
+    def get_body_pos(self, body: ScenarioBody, t_s: float) -> Vec3:
+        return body.pos(t_s)
 
 
 class PlanarScenario:
-    """Horizons proyectado en el plano orbital inicial, con ejes fijos.
+    """Horizons proyectado en el plano orbital inicial, con ejes fijos 2D."""
 
-    Origen: baricentro Tierra–Luna. Plano: el de la órbita lunar en la fecha
-    inicial. X: equinoccio vernal (eje X de ICRF) proyectado en ese plano, por
-    lo que es la MISMA dirección para cualquier fecha y el ángulo de la Luna en
-    el plano equivale a su longitud eclíptica. Y: completa el triedro en el
-    sentido del movimiento lunar. Se omite la componente perpendicular al plano.
-    La dinámica de la nave considera únicamente gravedad terrestre y lunar.
-    """
+    frame = "earth_moon_barycentric_initial_orbital_plane"
 
-    def __init__(self, date: datetime, duration_s: float, *, spacing_s=3600.0):
-        import math
-        import numpy as np
-        from app.data.ephemeris import get_body_state_table
-        from app.models.domain import validate_positive
-
+    def __init__(
+        self,
+        date: datetime,
+        duration_s: float,
+        *,
+        spacing_s: float = 600.0,
+        include_sun: bool = True,
+    ) -> None:
         validate_positive(duration_s, "duration_s")
         validate_positive(spacing_s, "spacing_s")
-        self.date, self.duration_s = date, duration_s
-        catalog = load_bodies()
-        intervals = max(2, math.ceil(duration_s / spacing_s))
-        tables = {
-            key: get_body_state_table(catalog[key], date,
-                                     date + timedelta(seconds=duration_s), intervals)
-            for key in ("earth", "moon")
-        }
-        relative_position = np.subtract(tables["moon"][1][0], tables["earth"][1][0])
-        relative_velocity = np.subtract(tables["moon"][2][0], tables["earth"][2][0])
-        normal = np.cross(relative_position, relative_velocity)
-        if np.linalg.norm(normal) == 0:
-            raise ValueError("No se puede definir el plano orbital inicial.")
-        normal /= np.linalg.norm(normal)
-        # Eje X independiente de la fecha: equinoccio vernal proyectado en el plano.
-        # (Antes X = Tierra→Luna en t0, lo que dejaba la Luna siempre en (+X, 0).)
-        vernal_equinox = np.array((1.0, 0.0, 0.0))
-        x_axis = vernal_equinox - np.dot(vernal_equinox, normal) * normal
-        x_axis /= np.linalg.norm(x_axis)
-        self.basis_icrf = np.stack((x_axis, np.cross(normal, x_axis)))
-        self.bodies = {}
-        for key, (times, positions, velocities) in tables.items():
-            # timedelta redondea a µs: la última muestra puede quedar por debajo de
-            # duration_s y pos(duration_s) fallaría. Se fuerza al valor pedido.
-            times = np.array(times, dtype=float)
-            times[-1] = duration_s
-            self.bodies[key] = PlanarScenarioBody(
-                catalog[key], date, times,
-                np.asarray(positions) @ self.basis_icrf.T,
-                np.asarray(velocities) @ self.basis_icrf.T,
-            )
+        self.date = date
+        self.duration_s = duration_s
+        basis_3d = _initial_orbital_basis(date)
+        self.basis_icrf = basis_3d[:2]
+        body_ids = ("earth", "moon", "sun") if include_sun else ("earth", "moon")
+        self.bodies = _build_interpolated_bodies(
+            date, duration_s, spacing_s, basis=self.basis_icrf, planar=True, body_ids=body_ids
+        )
 
     def get_bodies(self) -> list[ScenarioBody]:
         return list(self.bodies.values())
+
+    def get_body_pos(self, body: ScenarioBody, t_s: float) -> Vec3:
+        return body.pos(t_s)

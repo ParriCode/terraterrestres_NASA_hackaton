@@ -1,7 +1,7 @@
 """F del documento: Lambert, shooting y trayectoria planar con datos Horizons.
 
 Tiempos en segundos desde scenario.date. Coordenadas del plano orbital inicial
-del escenario, origen baricéntrico y z=0. Se ignoran rotación y otras gravedades.
+del escenario, origen baricéntrico y z=0.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -65,8 +65,11 @@ class TransferResult:
             body.mu_m3_s2 / np.linalg.norm(r - body.pos(time_s))
             for body in self.scenario.get_bodies()
         )
-        return {"kinetic_j": float(kinetic), "potential_j": float(potential),
-                "mechanical_j": float(kinetic + potential)}
+        return {
+            "kinetic_j": float(kinetic),
+            "potential_j": float(potential),
+            "mechanical_j": float(kinetic + potential),
+        }
 
 
 def orbit_point(body, other, time_s: float, angle_deg: float, altitude_m: float = 0.0) -> Vec3:
@@ -88,15 +91,33 @@ def prograde_circular_velocity(mu_m3_s2: float, rel_pos_m: np.ndarray) -> np.nda
     return v_circ * u_t
 
 
-def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
-      scenario: PlanarScenario, mass_kg=1.0, arrival_tolerance_m=1000.0,
-      parking_alt_m: float = 0.0) -> TransferResult:
-    """Busca la mejor candidata válida entre semillas Lambert pro/retrógradas.
+def _earth_positions_xy(earth, times: np.ndarray) -> np.ndarray:
+    """Evalúa la posición XY de la Tierra vectorizada sobre todo el array de tiempos."""
+    motion = getattr(earth, "_motion", None)
+    if callable(motion):
+        return np.asarray(motion(times))[:, :2]
+    return np.array([earth.pos(float(t))[:2] for t in times])
 
-    Replica F del documento, sin garantía de óptimo global. El punto de salida
-    se sitúa a R_earth + parking_alt_m; el de llegada en la superficie lunar.
-    El Δv de salida se mide respecto a la velocidad circular prograde de aparcamiento
-    y el Δv de llegada asume frenado impulsivo hasta velocidad cero en superficie.
+
+def F(
+    x0: Vec3,
+    x1: Vec3,
+    t0: float,
+    t1: float,
+    objetivo="energia",
+    *,
+    scenario: PlanarScenario,
+    mass_kg=1.0,
+    arrival_tolerance_m=1000.0,
+    parking_alt_m: float = 0.0,
+    prograde_hint: bool | None = None,
+    warm_start_velocity: Vec3 | None = None,
+) -> TransferResult:
+    """Busca la mejor candidata válida entre semillas Lambert o arranque en caliente.
+
+    El punto de salida se sitúa a R_earth + parking_alt_m; el de llegada en la
+    superficie lunar. El Δv de salida se mide respecto a la velocidad circular
+    prograde de aparcamiento.
     """
     validate_vec3(x0, "x0")
     validate_vec3(x1, "x1")
@@ -110,6 +131,7 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
         raise ValueError("F trabaja en 2D: z debe ser cero.")
     if objetivo not in ("energia", "distancia", "delta_v"):
         raise ValueError("objetivo debe ser energia, distancia o delta_v.")
+
     earth, moon = scenario.bodies["earth"], scenario.bodies["moon"]
     start, target = np.asarray(x0), np.asarray(x1)
     if abs(np.linalg.norm(start - earth.pos(t0)) - (earth.radius_m + parking_alt_m)) > 1.0:
@@ -121,74 +143,120 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
     rel_start = start - np.asarray(earth.pos(t0))
     v_circ_vec = prograde_circular_velocity(earth.mu_m3_s2, rel_start)
     v_esc_moon_sq = 2.0 * moon.mu_m3_s2 / moon.radius_m
-    valid, reasons = [], []
+    body_keys = list(scenario.bodies)
+    earth_index = body_keys.index("earth")
+    moon_index = body_keys.index("moon")
+    valid: list[TransferResult] = []
+    reasons: list[str] = []
 
     def residual(velocity):
         solution = propagate_planar(scenario, x0, velocity, t0, t1)
         final = solution.y[:2, -1] - target[:2]
         return float(final[0]), float(final[1]), 0.0
 
-    for factors in ((1.0,), (0.98, 1.02)):
-        if valid:
-            break
-        for prograde in (True, False):
-            for factor in factors:
-                try:
-                    seed = solve_lambert(
-                        tuple(start - earth.pos(t0)), tuple(target - earth.pos(t1)),
-                        (t1 - t0) * factor, earth.mu_m3_s2, prograde=prograde,
-                    )
-                    guess = tuple(np.asarray(seed.departure_velocity_m_s) + earth_velocity)
-                    shot = solve_shooting(guess, residual, planar=True,
-                                          arrival_tolerance_m=arrival_tolerance_m,
-                                          max_evaluations=200)
-                    if not shot.converged:
-                        reasons.append(f"Error de llegada: {shot.residual_norm_m:.1f} m")
-                        continue
-                    velocity = np.asarray(shot.initial_velocity_m_s)
-                    if any(np.linalg.norm(velocity - r.initial_velocity_m_s) < 1 for r in valid):
-                        continue
-                    solution = propagate_planar(scenario, x0, velocity, t0, t1, events=True)
-                    earth_index = list(scenario.bodies).index("earth")
-                    moon_index = list(scenario.bodies).index("moon")
-                    if len(solution.t_events[earth_index]):
-                        reasons.append("La trayectoria vuelve a tocar la Tierra")
-                        continue
-                    if any(t < t1 - 60.0 for t in solution.t_events[moon_index]):
-                        reasons.append("Primer contacto lunar antes de tiempo")
-                        continue
-                    final_position = np.array((*solution.y[:2, -1], 0.0))
-                    final_velocity = np.array((*solution.y[2:, -1], 0.0))
-                    error = float(np.linalg.norm(final_position - target))
-                    if error > arrival_tolerance_m:
-                        reasons.append("Error de llegada tras validar")
-                        continue
-                    if np.dot(final_velocity - moon.speed(t1), final_position - moon.pos(t1)) >= 0:
-                        reasons.append("La nave no llega desde fuera de la Luna")
-                        continue
-                    times = np.linspace(t0, t1, 4000)
-                    relative = solution.sol(times)[:2].T - np.array([earth.pos(t)[:2] for t in times])
-                    # Respaldo ante salidas desde superficie (parking_alt_m=0) con dirección interior en t0.
-                    if float(np.min(np.linalg.norm(relative, axis=1))) < earth.radius_m - 10.0:
-                        reasons.append("La trayectoria penetra en la Tierra")
-                        continue
-                    length = float(np.linalg.norm(np.diff(relative, axis=0), axis=1).sum())
-                    rel_dep_vel = velocity - earth_velocity
-                    launch_speed = float(np.linalg.norm(rel_dep_vel))
-                    launch_delta_v = float(np.linalg.norm(rel_dep_vel - v_circ_vec))
-                    arrival_delta_v = float(np.linalg.norm(final_velocity - moon.speed(t1)))
-                    arrival_v_inf = float(np.sqrt(max(0.0, arrival_delta_v**2 - v_esc_moon_sq)))
-                    total_delta_v = float(launch_delta_v + arrival_delta_v)
-                    valid.append(TransferResult(
-                        scenario, t0, t1, shot.initial_velocity_m_s, launch_speed,
-                        0.5 * mass_kg * launch_speed**2, length, error,
-                        mass_kg, objetivo, launch_delta_v, arrival_v_inf,
-                        arrival_delta_v, total_delta_v, float(parking_alt_m), solution,
-                    ))
-                except (LambertError, RuntimeError, ArithmeticError, ValueError) as error:
-                    reasons.append(str(error))
+    def _validate_guess(guess: Vec3, max_evals: int) -> None:
+        shot = solve_shooting(
+            guess,
+            residual,
+            planar=True,
+            arrival_tolerance_m=arrival_tolerance_m,
+            max_evaluations=max_evals,
+        )
+        if not shot.converged:
+            reasons.append(f"Error de llegada: {shot.residual_norm_m:.1f} m")
+            return
+        velocity = np.asarray(shot.initial_velocity_m_s)
+        if any(np.linalg.norm(velocity - r.initial_velocity_m_s) < 1.0 for r in valid):
+            return
+        solution = propagate_planar(scenario, x0, velocity, t0, t1, events=True)
+        if len(solution.t_events[earth_index]):
+            reasons.append("La trayectoria vuelve a tocar la Tierra")
+            return
+        if any(t < t1 - 60.0 for t in solution.t_events[moon_index]):
+            reasons.append("Primer contacto lunar antes de tiempo")
+            return
+        final_position = np.array((*solution.y[:2, -1], 0.0))
+        final_velocity = np.array((*solution.y[2:, -1], 0.0))
+        error = float(np.linalg.norm(final_position - target))
+        if error > arrival_tolerance_m:
+            reasons.append("Error de llegada tras validar")
+            return
+        if np.dot(final_velocity - moon.speed(t1), final_position - moon.pos(t1)) >= 0:
+            reasons.append("La nave no llega desde fuera de la Luna")
+            return
+
+        times = np.linspace(t0, t1, 2000)
+        relative = solution.sol(times)[:2].T - _earth_positions_xy(earth, times)
+        if float(np.min(np.linalg.norm(relative, axis=1))) < earth.radius_m - 10.0:
+            reasons.append("La trayectoria penetra en la Tierra")
+            return
+
+        length = float(np.linalg.norm(np.diff(relative, axis=0), axis=1).sum())
+        rel_dep_vel = velocity - earth_velocity
+        launch_speed = float(np.linalg.norm(rel_dep_vel))
+        launch_delta_v = float(np.linalg.norm(rel_dep_vel - v_circ_vec))
+        arrival_delta_v = float(np.linalg.norm(final_velocity - moon.speed(t1)))
+        arrival_v_inf = float(np.sqrt(max(0.0, arrival_delta_v**2 - v_esc_moon_sq)))
+        total_delta_v = float(launch_delta_v + arrival_delta_v)
+        valid.append(
+            TransferResult(
+                scenario,
+                t0,
+                t1,
+                shot.initial_velocity_m_s,
+                launch_speed,
+                0.5 * mass_kg * launch_speed**2,
+                length,
+                error,
+                mass_kg,
+                objetivo,
+                launch_delta_v,
+                arrival_v_inf,
+                arrival_delta_v,
+                total_delta_v,
+                float(parking_alt_m),
+                solution,
+            )
+        )
+
+    # 1. Arranque en caliente si ya tenemos una velocidad cercana validada.
+    if warm_start_velocity is not None:
+        try:
+            _validate_guess(warm_start_velocity, max_evals=80)
+        except (RuntimeError, ArithmeticError, ValueError) as error:
+            reasons.append(str(error))
+
+    # 2. Semillas Lambert ordenadas por la rama más prometedora.
     if not valid:
-        raise TransferNotFoundError("No se encontró transferencia válida: " + "; ".join(sorted(set(reasons))))
+        prograde_seq = (
+            (prograde_hint, not prograde_hint)
+            if prograde_hint is not None
+            else (True, False)
+        )
+        rel_r1 = tuple(start - earth.pos(t0))
+        rel_r2 = tuple(target - earth.pos(t1))
+        for factors in ((1.0,), (0.98, 1.02)):
+            if valid:
+                break
+            for prograde in prograde_seq:
+                for factor in factors:
+                    try:
+                        seed = solve_lambert(
+                            rel_r1,
+                            rel_r2,
+                            (t1 - t0) * factor,
+                            earth.mu_m3_s2,
+                            prograde=prograde,
+                        )
+                        guess = tuple(np.asarray(seed.departure_velocity_m_s) + earth_velocity)
+                        _validate_guess(guess, max_evals=160)
+                    except (LambertError, RuntimeError, ArithmeticError, ValueError) as error:
+                        reasons.append(str(error))
+
+    if not valid:
+        raise TransferNotFoundError(
+            "No se encontró transferencia válida: " + "; ".join(sorted(set(reasons)))
+        )
     if objetivo == "energia":
         key = lambda r: r.launch_energy_j
     elif objetivo == "distancia":
@@ -198,13 +266,18 @@ def F(x0: Vec3, x1: Vec3, t0: float, t1: float, objetivo="energia", *,
     return min(valid, key=key)
 
 
-def design_transfer(date: datetime, duration_s: float, *, launch_angle_deg=90.0,
-                    arrival_angle_deg=0.0, objective="energia", mass_kg=1.0,
-                    spacing_s=3600.0, parking_alt_m: float = 0.0) -> TransferResult:
-    """Carga NASA y llama a F. Alfa: desde Tierra→Luna; beta: Luna→Tierra.
-
-    Los ángulos son geométricos del modelo planar, no latitud/longitud.
-    """
+def design_transfer(
+    date: datetime,
+    duration_s: float,
+    *,
+    launch_angle_deg=90.0,
+    arrival_angle_deg=0.0,
+    objective="energia",
+    mass_kg=1.0,
+    spacing_s=3600.0,
+    parking_alt_m: float = 0.0,
+) -> TransferResult:
+    """Carga NASA y llama a F. Alfa: desde Tierra→Luna; beta: Luna→Tierra."""
     if not np.isfinite(launch_angle_deg) or not np.isfinite(arrival_angle_deg):
         raise ValueError("Los ángulos deben ser finitos.")
     if not np.isfinite(parking_alt_m) or parking_alt_m < 0:
@@ -214,6 +287,10 @@ def design_transfer(date: datetime, duration_s: float, *, launch_angle_deg=90.0,
     return F(
         orbit_point(earth, moon, 0.0, launch_angle_deg, parking_alt_m),
         orbit_point(moon, earth, duration_s, arrival_angle_deg, 0.0),
-        0.0, duration_s, objective, scenario=scenario, mass_kg=mass_kg,
+        0.0,
+        duration_s,
+        objective,
+        scenario=scenario,
+        mass_kg=mass_kg,
         parking_alt_m=parking_alt_m,
     )

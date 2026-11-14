@@ -1,10 +1,16 @@
-from dataclasses import dataclass
+"""Optimización de transferencias Tierra→Luna e ida y vuelta Tierra→Luna→Tierra."""
+
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Sequence
+from typing import Literal, Sequence
 
 import numpy as np
+from scipy.integrate import solve_ivp
+from scipy.optimize import least_squares
 
-from app.data.scenarios import PlanarScenario
+from app.data.scenarios import PlanarScenario, SpatialScenario
+from app.models.domain import SpacecraftState, Vec3
+from app.physics.dynamics import state_derivative_array
 from app.physics.lambert import LambertError, solve_lambert
 from app.services.transfer_service import (
     F,
@@ -55,6 +61,45 @@ class OptimizationResult:
     propagations_run: int
 
 
+@dataclass(frozen=True)
+class RoundTripResult:
+    """Trayectoria 3D completa Tierra → Luna → Tierra."""
+
+    scenario: SpatialScenario
+    mode: Literal["free_return", "lunar_orbit"]
+    outbound_duration_s: float
+    lunar_stay_s: float
+    inbound_duration_s: float
+    total_duration_s: float
+    tli_delta_v_m_s: float
+    loi_delta_v_m_s: float
+    tei_delta_v_m_s: float
+    total_delta_v_m_s: float
+    min_lunar_altitude_m: float
+    earth_reentry_altitude_m: float
+    mass_kg: float
+    _segments: tuple[tuple[float, float, object], ...] = field(repr=False, default=())
+
+    def state(self, time_s: float) -> SpacecraftState:
+        if not np.isfinite(time_s) or not 0.0 <= time_s <= self.total_duration_s + 1e-6:
+            raise ValueError("Tiempo fuera del intervalo de la misión de retorno.")
+        t_clamped = float(np.clip(time_s, 0.0, self.total_duration_s))
+        for t_start, t_end, sol in self._segments:
+            if t_start - 1e-6 <= t_clamped <= t_end + 1e-6:
+                y = sol.sol(float(np.clip(t_clamped, t_start, t_end)))
+                return SpacecraftState(
+                    (float(y[0]), float(y[1]), float(y[2])),
+                    (float(y[3]), float(y[4]), float(y[5])),
+                )
+        raise ValueError("Segmento temporal no encontrado en RoundTripResult.")
+
+    def pos(self, time_s: float) -> Vec3:
+        return self.state(time_s).position_m
+
+    def speed(self, time_s: float) -> Vec3:
+        return self.state(time_s).velocity_m_s
+
+
 class NoFeasibleTransfer(RuntimeError):
     """No se encontró ninguna transferencia viable dentro de las restricciones dadas."""
 
@@ -70,7 +115,9 @@ class NoFeasibleTransfer(RuntimeError):
         self.tradeoff = list(tradeoff)
         self.min_duration_s = float(min_duration_s)
         self.max_duration_s = float(max_duration_s)
-        super().__init__("; ".join(self.reasons) if self.reasons else "No se encontró transferencia factible.")
+        super().__init__(
+            "; ".join(self.reasons) if self.reasons else "No se encontró transferencia factible."
+        )
 
 
 def _angle_diff_deg(a: float, b: float) -> float:
@@ -93,10 +140,11 @@ def _duration_grid(min_duration_s: float, max_duration_s: float, step_s: float) 
 def _lambert_periapsis_m(r1: np.ndarray, v1: np.ndarray, mu_earth: float) -> float:
     r_mag = float(np.linalg.norm(r1))
     v_sq = float(np.dot(v1, v1))
-    h_z = float(r1[0] * v1[1] - r1[1] * v1[0])
+    h_vec = np.cross(r1, v1)
+    h_sq = float(np.dot(h_vec, h_vec))
     ecc_vec = ((v_sq - mu_earth / r_mag) * r1 - float(np.dot(r1, v1)) * v1) / mu_earth
     ecc = float(np.linalg.norm(ecc_vec))
-    return float((h_z * h_z) / (mu_earth * (1.0 + ecc)))
+    return float(h_sq / (mu_earth * (1.0 + ecc)))
 
 
 def screen(
@@ -118,7 +166,9 @@ def screen(
     if not np.isfinite(duration_step_s) or duration_step_s <= 0:
         raise ValueError("duration_step_s debe ser positivo.")
 
-    upper_s = float(scenario.duration_s if max_duration_s is None else min(max_duration_s, scenario.duration_s))
+    upper_s = float(
+        scenario.duration_s if max_duration_s is None else min(max_duration_s, scenario.duration_s)
+    )
     durations = _duration_grid(min_duration_s, upper_s, duration_step_s)
     if not durations:
         return []
@@ -128,12 +178,12 @@ def screen(
     earth_pos_0 = np.asarray(earth.pos(0.0))
     v_esc_moon = float(np.sqrt(2.0 * moon.mu_m3_s2 / moon.radius_m))
 
-    launch_points: list[tuple[float, np.ndarray, np.ndarray, np.ndarray]] = []
+    launch_points: list[tuple[float, np.ndarray, tuple[float, float, float], np.ndarray]] = []
     for alpha in launch_angles_deg:
         p0 = np.asarray(orbit_point(earth, moon, 0.0, alpha, parking_alt_m))
         r1 = p0 - earth_pos_0
         v_circ = prograde_circular_velocity(earth.mu_m3_s2, r1)
-        launch_points.append((float(alpha), p0, r1, v_circ))
+        launch_points.append((float(alpha), r1, (float(r1[0]), float(r1[1]), 0.0), v_circ))
 
     candidates: list[Candidate] = []
     for duration_s in durations:
@@ -147,25 +197,24 @@ def screen(
             for beta in arrival_angles_deg
         ]
 
-        for alpha, _, r1, v_circ in launch_points:
-            r1_tuple = (float(r1[0]), float(r1[1]), 0.0)
+        for alpha, r1, r1_tuple, v_circ in launch_points:
             for beta, p1 in arrival_points:
                 r2 = p1 - earth_pos_t1
                 r2_tuple = (float(r2[0]), float(r2[1]), 0.0)
                 r_moon_surf = p1 - moon_pos_t1
                 for prograde in prograde_options:
                     try:
-                        seed = solve_lambert(r1_tuple, r2_tuple, duration_s, earth.mu_m3_s2, prograde=prograde)
+                        seed = solve_lambert(
+                            r1_tuple, r2_tuple, duration_s, earth.mu_m3_s2, prograde=prograde
+                        )
                     except (LambertError, ValueError, ArithmeticError):
                         continue
                     v_dep_rel = np.asarray(seed.departure_velocity_m_s)
-                    # Descartar salidas hacia abajo cuyo periapsis dos-cuerpos atraviesa la Tierra.
                     if float(np.dot(r1, v_dep_rel)) < -1.0:
                         if _lambert_periapsis_m(r1, v_dep_rel, earth.mu_m3_s2) < earth.radius_m:
                             continue
                     v_arr_bary = earth_vel_t1 + np.asarray(seed.arrival_velocity_m_s)
                     v_inf_vec = v_arr_bary - moon_vel_t1
-                    # Descartar puntos de llegada en el hemisferio lunar saliente.
                     if float(np.dot(v_inf_vec, r_moon_surf)) >= 0.0:
                         continue
 
@@ -173,16 +222,18 @@ def screen(
                     v_inf = float(np.linalg.norm(v_inf_vec))
                     arrival_dv = float(np.hypot(v_inf, v_esc_moon))
                     total_dv = float(launch_dv + arrival_dv)
-                    candidates.append(Candidate(
-                        duration_s=float(duration_s),
-                        launch_angle_deg=alpha,
-                        arrival_angle_deg=beta,
-                        prograde=bool(prograde),
-                        estimated_launch_delta_v_m_s=launch_dv,
-                        estimated_v_infinity_m_s=v_inf,
-                        estimated_arrival_delta_v_m_s=arrival_dv,
-                        estimated_total_delta_v_m_s=total_dv,
-                    ))
+                    candidates.append(
+                        Candidate(
+                            duration_s=float(duration_s),
+                            launch_angle_deg=alpha,
+                            arrival_angle_deg=beta,
+                            prograde=bool(prograde),
+                            estimated_launch_delta_v_m_s=launch_dv,
+                            estimated_v_infinity_m_s=v_inf,
+                            estimated_arrival_delta_v_m_s=arrival_dv,
+                            estimated_total_delta_v_m_s=total_dv,
+                        )
+                    )
 
     candidates.sort(key=lambda c: c.estimated_total_delta_v_m_s)
     return candidates
@@ -241,6 +292,8 @@ def _evaluate_candidate(
     *,
     parking_alt_m: float,
     mass_kg: float,
+    prograde_hint: bool | None = None,
+    warm_start_velocity: Vec3 | None = None,
 ) -> TransferResult:
     earth, moon = scenario.bodies["earth"], scenario.bodies["moon"]
     return F(
@@ -252,6 +305,8 @@ def _evaluate_candidate(
         scenario=scenario,
         mass_kg=mass_kg,
         parking_alt_m=parking_alt_m,
+        prograde_hint=prograde_hint,
+        warm_start_velocity=warm_start_velocity,
     )
 
 
@@ -265,7 +320,7 @@ def refine_local(
     max_duration_s: float,
     mass_kg: float = 1.0,
 ) -> tuple[TransferResult, Candidate, int]:
-    """Refinamiento local por coordenadas sobre (duración, α, β) manteniendo el límite."""
+    """Refinamiento local con arranque en caliente sobre (duración, α, β)."""
     best_result = initial_result
     best_duration = initial_candidate.duration_s
     best_alpha = initial_candidate.launch_angle_deg
@@ -298,8 +353,14 @@ def refine_local(
             evaluations += 1
             try:
                 candidate_res = _evaluate_candidate(
-                    scenario, dur, alpha, beta,
-                    parking_alt_m=parking_alt_m, mass_kg=mass_kg,
+                    scenario,
+                    dur,
+                    alpha,
+                    beta,
+                    parking_alt_m=parking_alt_m,
+                    mass_kg=mass_kg,
+                    prograde_hint=initial_candidate.prograde,
+                    warm_start_velocity=best_result.initial_velocity_m_s,
                 )
             except (TransferNotFoundError, LambertError, ValueError, RuntimeError):
                 continue
@@ -314,10 +375,10 @@ def refine_local(
         launch_angle_deg=best_alpha,
         arrival_angle_deg=best_beta,
         prograde=initial_candidate.prograde,
-        estimated_launch_delta_v_m_s=initial_candidate.estimated_launch_delta_v_m_s,
-        estimated_v_infinity_m_s=initial_candidate.estimated_v_infinity_m_s,
-        estimated_arrival_delta_v_m_s=initial_candidate.estimated_arrival_delta_v_m_s,
-        estimated_total_delta_v_m_s=initial_candidate.estimated_total_delta_v_m_s,
+        estimated_launch_delta_v_m_s=best_result.launch_delta_v_m_s,
+        estimated_v_infinity_m_s=best_result.arrival_v_infinity_m_s,
+        estimated_arrival_delta_v_m_s=best_result.arrival_delta_v_m_s,
+        estimated_total_delta_v_m_s=best_result.total_delta_v_m_s,
     )
     return best_result, refined_candidate, evaluations
 
@@ -330,7 +391,7 @@ def optimize_transfer(
     min_duration_s: float = DEFAULT_MIN_DURATION_S,
     duration_step_s: float = DEFAULT_DURATION_STEP_S,
     spacing_s: float = 3600.0,
-    top_k: int = 6,
+    top_k: int = 4,
     mass_kg: float = 1.0,
     refine: bool = True,
 ) -> OptimizationResult:
@@ -395,6 +456,7 @@ def optimize_transfer(
                     cand.arrival_angle_deg,
                     parking_alt_m=parking_alt_m,
                     mass_kg=mass_kg,
+                    prograde_hint=cand.prograde,
                 )
                 validated.append((res, cand))
             except (TransferNotFoundError, LambertError, ValueError, RuntimeError) as error:
@@ -402,7 +464,7 @@ def optimize_transfer(
 
     try_candidates(shortlist)
     if not validated:
-        fallback = [c for c in candidates[: max(top_k * 2, 12)] if c not in shortlist]
+        fallback = [c for c in candidates[: max(top_k * 2, 10)] if c not in shortlist]
         try_candidates(fallback)
 
     if not validated:
@@ -435,3 +497,387 @@ def optimize_transfer(
         candidates_evaluated=len(candidates),
         propagations_run=propagations_run,
     )
+
+
+# ---------------------------------------------------------------------------
+# Trayectorias 3D de ida y vuelta: Tierra → Luna → Tierra
+# ---------------------------------------------------------------------------
+
+
+def _propagate_3d(
+    bodies: tuple,
+    y0: np.ndarray,
+    t0: float,
+    t1: float,
+    *,
+    rtol: float = 1e-8,
+    atol: float = 1e-8,
+    dense_output: bool = True,
+):
+    return solve_ivp(
+        lambda t, y: state_derivative_array(t, y, bodies),
+        (float(t0), float(t1)),
+        np.asarray(y0, dtype=np.float64),
+        method="DOP853",
+        rtol=rtol,
+        atol=atol,
+        dense_output=dense_output,
+    )
+
+
+def _parking_state_3d(
+    earth,
+    moon,
+    alpha_deg: float,
+    parking_alt_m: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Posición y velocidad inercial en la órbita circular de aparcamiento terrestre."""
+    e_pos = np.asarray(earth.pos(0.0), dtype=np.float64)
+    e_vel = np.asarray(earth.speed(0.0), dtype=np.float64)
+    rel_m = np.asarray(moon.pos(0.0), dtype=np.float64) - e_pos
+    rel_v = np.asarray(moon.speed(0.0), dtype=np.float64) - e_vel
+
+    u_em = rel_m / np.linalg.norm(rel_m)
+    h_vec = np.cross(rel_m, rel_v)
+    u_h = h_vec / np.linalg.norm(h_vec)
+    u_perp = np.cross(u_h, u_em)
+
+    rad = np.deg2rad(alpha_deg)
+    u_r = np.cos(rad) * u_em + np.sin(rad) * u_perp
+    u_t = -np.sin(rad) * u_em + np.cos(rad) * u_perp
+
+    r_park = earth.radius_m + parking_alt_m
+    v_circ = float(np.sqrt(earth.mu_m3_s2 / r_park))
+    pos_0 = e_pos + r_park * u_r
+    vel_0 = e_vel + v_circ * u_t
+    return pos_0, vel_0
+
+
+def _shoot_3d_target(
+    bodies: tuple,
+    r0: np.ndarray,
+    v0_guess: np.ndarray,
+    t0: float,
+    t1: float,
+    target_pos_fn,
+    *,
+    tol_m: float = 2_000.0,
+) -> tuple[bool, np.ndarray, object]:
+    """Ajusta v0 en 3D mediante Trust-Region Reflective para alcanzar target_pos_fn(t1)."""
+    target_r = np.asarray(target_pos_fn(t1), dtype=np.float64)
+    scale = 100.0
+
+    def res_fn(dv: np.ndarray) -> np.ndarray:
+        v_try = v0_guess + dv * scale
+        sol = _propagate_3d(
+            bodies, np.concatenate((r0, v_try)), t0, t1, rtol=1e-7, atol=1e-7, dense_output=False
+        )
+        if not sol.success:
+            return np.full(3, 1e9)
+        return (sol.y[:3, -1] - target_r) / 1000.0
+
+    opt = least_squares(
+        res_fn,
+        np.zeros(3, dtype=np.float64),
+        method="trf",
+        bounds=(-15.0, 15.0),
+        ftol=1e-7,
+        xtol=1e-7,
+        max_nfev=45,
+    )
+    v0_opt = v0_guess + opt.x * scale
+    sol_final = _propagate_3d(
+        bodies, np.concatenate((r0, v0_opt)), t0, t1, rtol=1e-9, atol=1e-9, dense_output=True
+    )
+    err_m = float(np.linalg.norm(sol_final.y[:3, -1] - target_r))
+    return bool(sol_final.success and err_m <= tol_m), v0_opt, sol_final
+
+
+def _min_body_altitude(sol, body, t0: float, t1: float, n: int = 800) -> tuple[float, float]:
+    """Devuelve (altitud_minima_m, instante_t_s) de una solución densa respecto a un cuerpo."""
+    ts = np.linspace(t0, t1, n)
+    ys = sol.sol(ts)[:3].T
+    b_pos = np.array([body.pos(float(t)) for t in ts])
+    dists = np.linalg.norm(ys - b_pos, axis=1)
+    idx = int(np.argmin(dists))
+    return float(dists[idx] - body.radius_m), float(ts[idx])
+
+
+def optimize_round_trip_transfer(
+    date: datetime,
+    *,
+    mode: Literal["free_return", "lunar_orbit"] = "free_return",
+    max_total_duration_s: float = 14 * 86400.0,
+    parking_alt_m: float = DEFAULT_PARKING_ALT_M,
+    lunar_periapsis_alt_m: float = 150_000.0,
+    lunar_stay_s: float = 0.0,
+    reentry_alt_m: float = 120_000.0,
+    mass_kg: float = 1.0,
+) -> RoundTripResult:
+    """Optimiza una misión 3D completa Tierra → Luna → Tierra.
+
+    - mode='free_return': encendido único TLI + sobrevuelo lunar con retorno balístico
+      a la interfaz de reentrada terrestre (estilo Apolo 8 / Apolo 13).
+    - mode='lunar_orbit': TLI + inserción en órbita lunar (LOI) + estancia +
+      inyección transterrestre (TEI) hasta reentrada terrestre (estilo Apolo 11).
+    """
+    if mode not in ("free_return", "lunar_orbit"):
+        raise ValueError("mode debe ser 'free_return' o 'lunar_orbit'.")
+    if max_total_duration_s < 5.5 * 86400.0 + lunar_stay_s:
+        raise NoFeasibleTransfer(
+            [
+                "max_total_duration_s es demasiado corto para completar ida, estancia y retorno "
+                f"(mínimo recomendado: {(5.5 * 86400.0 + lunar_stay_s) / 86400.0:.1f} días)."
+            ]
+        )
+
+    scenario = SpatialScenario(date, max_total_duration_s, spacing_s=600.0, include_sun=True)
+    earth = scenario.bodies["earth"]
+    moon = scenario.bodies["moon"]
+    bodies = tuple(scenario.get_bodies())
+
+    e_pos_0 = np.asarray(earth.pos(0.0), dtype=np.float64)
+    e_vel_0 = np.asarray(earth.speed(0.0), dtype=np.float64)
+    r_p_moon = moon.radius_m + lunar_periapsis_alt_m
+    r_reentry = earth.radius_m + reentry_alt_m
+    v_circ_moon = float(np.sqrt(moon.mu_m3_s2 / r_p_moon))
+
+    reasons: list[str] = []
+    best_rt: RoundTripResult | None = None
+
+    # Exploración de ventanas de ida (3.0 a 4.5 días) y ángulos de fase en órbita baja.
+    out_durations = [d * 86400.0 for d in (3.0, 3.5, 4.0, 4.5) if d * 86400.0 + lunar_stay_s + 2.5 * 86400.0 <= max_total_duration_s]
+    launch_angles = tuple(float(a) for a in range(180, 360, 20))
+
+    if mode == "free_return":
+        # En retorno libre, la nave pasa por delante/detrás de la Luna para invertir su velocidad
+        # heliocéntrica/baricéntrica y caer de vuelta hacia el corredor de reentrada terrestre.
+        for t_out in out_durations:
+            m_pos_1 = np.asarray(moon.pos(t_out), dtype=np.float64)
+            m_vel_1 = np.asarray(moon.speed(t_out), dtype=np.float64)
+            u_m_vel = m_vel_1 / np.linalg.norm(m_vel_1)
+            # Punto de perilunio adelantado respecto al movimiento lunar para curvar hacia la Tierra
+            target_peri_1 = m_pos_1 + r_p_moon * u_m_vel
+
+            for alpha in launch_angles:
+                r0, v_park = _parking_state_3d(earth, moon, alpha, parking_alt_m)
+                try:
+                    seed = solve_lambert(
+                        tuple(r0 - e_pos_0),
+                        tuple(target_peri_1 - np.asarray(earth.pos(t_out))),
+                        t_out,
+                        earth.mu_m3_s2,
+                        prograde=True,
+                    )
+                except (LambertError, ValueError, ArithmeticError):
+                    continue
+
+                v_guess = e_vel_0 + np.asarray(seed.departure_velocity_m_s, dtype=np.float64)
+                t_in_est = min(t_out * 1.05, max_total_duration_s - t_out)
+                t_total_est = t_out + t_in_est
+
+                def _fr_residuals(params: np.ndarray) -> np.ndarray:
+                    v_try = v_guess + params[:3] * 50.0
+                    t_flight = float(np.clip(t_total_est + params[3] * 3600.0, t_out + 2.0 * 86400.0, max_total_duration_s))
+                    sol = _propagate_3d(
+                        bodies, np.concatenate((r0, v_try)), 0.0, t_flight, rtol=1e-7, atol=1e-7, dense_output=True
+                    )
+                    if not sol.success:
+                        return np.array([1e6, 1e6, 1e6])
+                    min_m_alt, _ = _min_body_altitude(sol, moon, 0.5 * t_out, min(t_flight, 1.5 * t_out), n=400)
+                    min_e_alt, _ = _min_body_altitude(sol, earth, t_out + 1.0 * 86400.0, t_flight, n=500)
+                    # Penalización suave por Δv para preferir el retorno libre mínimo
+                    dv_pen = np.linalg.norm(v_try - v_park) / 100.0
+                    return np.array([
+                        (min_m_alt - lunar_periapsis_alt_m) / 1000.0,
+                        (min_e_alt - reentry_alt_m) / 1000.0,
+                        dv_pen,
+                    ])
+
+                fit = least_squares(
+                    _fr_residuals,
+                    np.zeros(4, dtype=np.float64),
+                    method="trf",
+                    bounds=([-10.0, -10.0, -10.0, -36.0], [10.0, 10.0, 10.0, 36.0]),
+                    ftol=1e-6,
+                    xtol=1e-6,
+                    max_nfev=40,
+                )
+                v0_opt = v_guess + fit.x[:3] * 50.0
+                t_total_opt = float(np.clip(t_total_est + fit.x[3] * 3600.0, t_out + 2.0 * 86400.0, max_total_duration_s))
+                sol_full = _propagate_3d(
+                    bodies, np.concatenate((r0, v0_opt)), 0.0, t_total_opt, rtol=1e-9, atol=1e-9, dense_output=True
+                )
+                if not sol_full.success:
+                    continue
+
+                min_m_alt, t_peri_m = _min_body_altitude(sol_full, moon, 0.5 * t_out, min(t_total_opt, 1.5 * t_out), n=600)
+                min_e_alt, t_reentry = _min_body_altitude(sol_full, earth, t_peri_m + 86400.0, t_total_opt, n=800)
+
+                if min_m_alt < 20_000.0 or abs(min_m_alt - lunar_periapsis_alt_m) > 150_000.0:
+                    reasons.append(f"Perilunio fuera de corredor ({min_m_alt / 1000:.1f} km)")
+                    continue
+                if min_e_alt < 0.0 or abs(min_e_alt - reentry_alt_m) > 150_000.0:
+                    reasons.append(f"Reentrada fuera de corredor ({min_e_alt / 1000:.1f} km)")
+                    continue
+
+                tli_dv = float(np.linalg.norm(v0_opt - v_park))
+                cand_rt = RoundTripResult(
+                    scenario=scenario,
+                    mode="free_return",
+                    outbound_duration_s=float(t_peri_m),
+                    lunar_stay_s=0.0,
+                    inbound_duration_s=float(t_reentry - t_peri_m),
+                    total_duration_s=float(t_reentry),
+                    tli_delta_v_m_s=tli_dv,
+                    loi_delta_v_m_s=0.0,
+                    tei_delta_v_m_s=0.0,
+                    total_delta_v_m_s=tli_dv,
+                    min_lunar_altitude_m=float(min_m_alt),
+                    earth_reentry_altitude_m=float(min_e_alt),
+                    mass_kg=float(mass_kg),
+                    _segments=((0.0, float(t_reentry), sol_full),),
+                )
+                if best_rt is None or cand_rt.total_delta_v_m_s < best_rt.total_delta_v_m_s:
+                    best_rt = cand_rt
+
+    else:
+        # Modo lunar_orbit: Tramo 1 (TLI -> LOI) + Tramo 2 (Órbita lunar) + Tramo 3 (TEI -> Tierra)
+        for t_out in out_durations:
+            t_depart_moon = t_out + lunar_stay_s
+            remaining_s = max_total_duration_s - t_depart_moon
+            if remaining_s < 2.5 * 86400.0:
+                continue
+            t_in = min(t_out, remaining_s)
+            t_end = t_depart_moon + t_in
+
+            m_pos_1 = np.asarray(moon.pos(t_out), dtype=np.float64)
+            m_vel_1 = np.asarray(moon.speed(t_out), dtype=np.float64)
+            u_m_vel = m_vel_1 / np.linalg.norm(m_vel_1)
+            target_peri_1 = m_pos_1 - r_p_moon * u_m_vel
+
+            for alpha in launch_angles:
+                r0, v_park = _parking_state_3d(earth, moon, alpha, parking_alt_m)
+                try:
+                    seed_out = solve_lambert(
+                        tuple(r0 - e_pos_0),
+                        tuple(target_peri_1 - np.asarray(earth.pos(t_out))),
+                        t_out,
+                        earth.mu_m3_s2,
+                        prograde=True,
+                    )
+                except (LambertError, ValueError, ArithmeticError):
+                    continue
+
+                v_guess_out = e_vel_0 + np.asarray(seed_out.departure_velocity_m_s, dtype=np.float64)
+                ok_out, v0_opt, sol_out = _shoot_3d_target(
+                    bodies, r0, v_guess_out, 0.0, t_out, lambda _t, p=target_peri_1: p, tol_m=5_000.0
+                )
+                if not ok_out:
+                    reasons.append("Tramo de ida no convergió al perilunio")
+                    continue
+
+                tli_dv = float(np.linalg.norm(v0_opt - v_park))
+                r_arr_m = sol_out.y[:3, -1]
+                v_arr_m = sol_out.y[3:, -1]
+
+                # Inserción circular en órbita lunar (LOI) en el plano de aproximación
+                r_rel_m = r_arr_m - m_pos_1
+                v_rel_m = v_arr_m - m_vel_1
+                u_r_m = r_rel_m / np.linalg.norm(r_rel_m)
+                h_m = np.cross(r_rel_m, v_rel_m)
+                if np.linalg.norm(h_m) == 0.0:
+                    continue
+                u_t_m = np.cross(h_m / np.linalg.norm(h_m), u_r_m)
+                v_loi_inertial = m_vel_1 + v_circ_moon * u_t_m
+                loi_dv = float(np.linalg.norm(v_loi_inertial - v_arr_m))
+
+                # Propagación de estancia en órbita lunar
+                if lunar_stay_s > 0.0:
+                    sol_stay = _propagate_3d(
+                        bodies,
+                        np.concatenate((r_arr_m, v_loi_inertial)),
+                        t_out,
+                        t_depart_moon,
+                        rtol=1e-8,
+                        atol=1e-8,
+                        dense_output=True,
+                    )
+                    if not sol_stay.success:
+                        continue
+                    r_tei = sol_stay.y[:3, -1]
+                    v_pre_tei = sol_stay.y[3:, -1]
+                else:
+                    sol_stay = None
+                    r_tei = r_arr_m
+                    v_pre_tei = v_loi_inertial
+
+                # Tramo 3: Inyección transterrestre (TEI) hacia interfaz de reentrada
+                e_pos_end = np.asarray(earth.pos(t_end), dtype=np.float64)
+                e_vel_end = np.asarray(earth.speed(t_end), dtype=np.float64)
+                u_to_earth = (e_pos_end - r_tei) / np.linalg.norm(e_pos_end - r_tei)
+                u_perp_e = np.cross(np.array((0.0, 0.0, 1.0)), u_to_earth)
+                u_perp_e /= np.linalg.norm(u_perp_e)
+                target_reentry = e_pos_end + r_reentry * u_perp_e
+
+                try:
+                    seed_in = solve_lambert(
+                        tuple(r_tei - np.asarray(earth.pos(t_depart_moon))),
+                        tuple(target_reentry - e_pos_end),
+                        t_in,
+                        earth.mu_m3_s2,
+                        prograde=True,
+                    )
+                except (LambertError, ValueError, ArithmeticError):
+                    continue
+
+                v_guess_in = np.asarray(earth.speed(t_depart_moon)) + np.asarray(
+                    seed_in.departure_velocity_m_s, dtype=np.float64
+                )
+                ok_in, v_tei_opt, sol_in = _shoot_3d_target(
+                    bodies,
+                    r_tei,
+                    v_guess_in,
+                    t_depart_moon,
+                    t_end,
+                    lambda _t, p=target_reentry: p,
+                    tol_m=15_000.0,
+                )
+                if not ok_in:
+                    reasons.append("Tramo de retorno no convergió a la reentrada terrestre")
+                    continue
+
+                tei_dv = float(np.linalg.norm(v_tei_opt - v_pre_tei))
+                total_dv = float(tli_dv + loi_dv + tei_dv)
+                min_m_alt, _ = _min_body_altitude(sol_out, moon, 0.5 * t_out, t_out, n=400)
+                min_e_alt, _ = _min_body_altitude(sol_in, earth, t_depart_moon + 0.5 * t_in, t_end, n=400)
+
+                segments = [(0.0, float(t_out), sol_out)]
+                if sol_stay is not None:
+                    segments.append((float(t_out), float(t_depart_moon), sol_stay))
+                segments.append((float(t_depart_moon), float(t_end), sol_in))
+
+                cand_rt = RoundTripResult(
+                    scenario=scenario,
+                    mode="lunar_orbit",
+                    outbound_duration_s=float(t_out),
+                    lunar_stay_s=float(lunar_stay_s),
+                    inbound_duration_s=float(t_in),
+                    total_duration_s=float(t_end),
+                    tli_delta_v_m_s=tli_dv,
+                    loi_delta_v_m_s=loi_dv,
+                    tei_delta_v_m_s=tei_dv,
+                    total_delta_v_m_s=total_dv,
+                    min_lunar_altitude_m=float(min_m_alt),
+                    earth_reentry_altitude_m=float(min_e_alt),
+                    mass_kg=float(mass_kg),
+                    _segments=tuple(segments),
+                )
+                if best_rt is None or cand_rt.total_delta_v_m_s < best_rt.total_delta_v_m_s:
+                    best_rt = cand_rt
+
+    if best_rt is None:
+        raise NoFeasibleTransfer(
+            reasons or ["No se encontró ninguna trayectoria de retorno viable en la ventana dada."]
+        )
+    return best_rt

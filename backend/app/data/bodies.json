@@ -4,7 +4,7 @@
     "url": "https://ssd.jpl.nasa.gov/api/horizons.api",
     "api_version": "1.2",
     "retrieved_at_utc": "2026-11-14T11:23:56.125575+00:00",
-    "notes": "Radio volumétrico medio; magnitudes convertidas a unidades SI."
+    "notes": "Radio volumétrico medio; magnitudes convertidas a unidades SI (4 cuerpos: Tierra, Luna, Sol, Nave)."
   },
   "bodies": {
     "earth": {
@@ -20,6 +20,13 @@
       "mu_m3_s2": 4902800066000.0,
       "radius_m": 1737530.0,
       "mass": 7.349e+22
+    },
+    "sun": {
+      "id": "sun",
+      "name": "Sun",
+      "mu_m3_s2": 1.3271244004193938e20,
+      "radius_m": 695700000.0,
+      "mass": 1.98841e30
     }
   }
 }
