@@ -1,0 +1,1 @@
+"""Aceleración gravitatoria."""
