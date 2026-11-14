@@ -5,6 +5,7 @@ del escenario, origen baricéntrico y z=0. Se ignoran rotación y otras gravedad
 """
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 import time
 from typing import Callable
 
@@ -196,6 +197,7 @@ class OptimizedTransfer:
     timed_out_angles_deg: tuple[float, ...]
 
 
+@lru_cache(maxsize=12)
 def optimize_transfer(
     date: datetime,
     duration_s: float,
@@ -210,6 +212,7 @@ def optimize_transfer(
 ) -> OptimizedTransfer:
     """Busca un ángulo de llegada sin asumir que 0° sea el óptimo.
 
+    Reutiliza en memoria el resultado si se repite exactamente la petición.
     Misma fecha/duración y efemérides para todos los candidatos. En primer
     lugar se evalúa una rejilla circular de ángulos; después se prueban dos
     vecinos del mejor resultado. Se rechazan impactos y fallos de llegada por
@@ -306,7 +309,7 @@ def optimize_transfer(
             for offset in (-coarse_step_deg / 3.0, coarse_step_deg / 3.0):
                 attempt(best_angle + offset)
     except TimeoutError:
-        pass
+        complete = False
 
     if best is None or best_angle is None:
         suffix = " (tiempo agotado)" if not complete else ""

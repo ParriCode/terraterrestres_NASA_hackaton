@@ -7,10 +7,15 @@ from app.physics.gravity import gravitational_acceleration
 
 
 def propagate_planar(scenario, position_m, velocity_m_s, t0, t1, *, events=False, budget_check=None):
-    """DOP853 con salida densa. Durante shooting se desactivan los eventos.
+    """DOP853 con salida densa; detiene el vuelo ante el primer impacto.
 
-    Los eventos registran cruces entrantes; la holgura terrestre de 1 m permite
-    partir de la superficie sin identificar la salida como una colisión.
+    Se comprueban los impactos también durante *shooting*: permitir que una
+    candidata provisional atraviese un planeta provoca integraciones muy
+    lentas cerca de la singularidad gravitatoria. La holgura de 1 m para la
+    Tierra permite iniciar el vuelo exactamente en su superficie.
+
+    ``events`` se conserva por compatibilidad con los llamadores existentes;
+    la protección ante colisiones está activa en ambos casos.
     """
     bodies = scenario.get_bodies()
 
@@ -29,14 +34,15 @@ def propagate_planar(scenario, position_m, velocity_m_s, t0, t1, *, events=False
         return state[2], state[3], a[0], a[1]
 
     event_functions = []
-    if events:
-        for body in bodies:
-            def contact(t, state, body=body):
-                radius = body.radius_m - (1.0 if body.id == "earth" else 0.0)
-                return np.linalg.norm(state[:2] - np.asarray(body.pos(t))[:2]) - radius
-            contact.direction = -1
-            contact.terminal = False
-            event_functions.append(contact)
+    # Detener cada propagación al primer impacto (también durante shooting).
+    # Continuar dentro de un cuerpo provoca pasos infinitesimales cerca del centro.
+    for body in bodies:
+        def contact(t, state, body=body):
+            radius = body.radius_m - (1.0 if body.id == "earth" else 0.0)
+            return np.linalg.norm(state[:2] - np.asarray(body.pos(t))[:2]) - radius
+        contact.direction = -1
+        contact.terminal = True
+        event_functions.append(contact)
     solution = solve_ivp(
         derivative, (t0, t1), (*position_m[:2], *velocity_m_s[:2]),
         method="DOP853", rtol=1e-10, atol=1e-6, dense_output=True,

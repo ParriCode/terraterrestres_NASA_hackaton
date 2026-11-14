@@ -83,8 +83,16 @@ def optimize(request: OptimizeTransferRequest):
         )
     except EphemerisError as error:
         raise HTTPException(502, str(error)) from error
-    except (TransferNotFoundError, ValueError) as error:
-        raise HTTPException(422, str(error)) from error
+    except TransferNotFoundError as error:
+        raise HTTPException(status_code=422, detail={
+            "code": "no_valid_transfer",
+            "message": str(error),
+            "suggestion": "Prueba otra fecha o duración. Una búsqueda acotada sin resultados no demuestra que la trayectoria sea imposible.",
+        }) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={
+            "code": "invalid_transfer_parameters", "message": str(error),
+        }) from error
     payload = serialize_transfer(optimized.transfer, request, arrival_angle_deg=optimized.arrival_angle_deg)
     payload["optimization"] = {
         "method": "bounded_angle_search",
