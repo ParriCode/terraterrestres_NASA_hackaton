@@ -110,6 +110,7 @@ class SimulationConfig:
             raise ValueError("'date' must include a timezone.")
 
 
+<<<<<<< HEAD
 #@dataclass(frozen=True)
 #class Simulation:
 #    name: str
@@ -131,6 +132,9 @@ class SimulationConfig:
 #            raise TypeError("'date' must be a valid datetime instance.")
 
 
+=======
+# Une en un tiempo el estado de la nave y las posiciones de los cuerpos
+>>>>>>> 20ca37e ([ANGEL] fix)
 @dataclass(frozen=True)
 class TrajectorySample:
     t_s: float
