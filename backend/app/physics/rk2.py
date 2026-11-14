@@ -48,13 +48,10 @@ def rk2_step(
     if not math.isfinite(step_s) or step_s <= 0:
         raise ValueError("Invalid integration step")
 
-    bodies = list(scenario.bodies.values())
-
     dr_1, dv_1 = state_derivative(
         t_s,
         state,
         scenario,
-        bodies,
     )
 
     midpoint_state = SpacecraftState(
@@ -74,7 +71,6 @@ def rk2_step(
         midpoint_time,
         midpoint_state,
         scenario,
-        bodies,
     )
 
     next_state = SpacecraftState(
@@ -89,7 +85,7 @@ def rk2_step(
     )
 
     return next_state
-    
+
 
 """
 !Recibe configuración y proveedor de cuerpos

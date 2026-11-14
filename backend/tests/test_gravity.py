@@ -91,10 +91,10 @@ def test_non_finite_result_raises_gravity_error():
     body = CelestialBody(
         id="earth",
         name="Earth",
-        mu_m3_s2=float("inf"),
-        radius_m=1.0,
+        mu_m3_s2=1e308,
+        radius_m=0.01,
     )
     with pytest.raises(GravityError, match="Invalid acceleration"):
         gravitational_acceleration(
-            (2.0, 0.0, 0.0), {"earth": (0.0, 0.0, 0.0)}, [body]
+            (0.1, 0.0, 0.0), {"earth": (0.0, 0.0, 0.0)}, [body]
         )

@@ -25,4 +25,4 @@ def is_collision(
     if not math.isfinite(distance_sq):
         raise ValueError("Non-finite distance")
 
-    return distance_sq < body_radius_m**2
+    return distance_sq <= body_radius_m**2
