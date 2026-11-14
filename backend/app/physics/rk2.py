@@ -11,6 +11,7 @@ from app.data.scenarios import Scenario
 from app.models.domain import (
     CelestialBody,
     Event,
+    EventType,
     SimulationConfig,
     SimulationStatus,
     SpacecraftState,
@@ -224,7 +225,7 @@ def integrate(
 
     collided = find_colliding_body(state, positions, bodies)
     if collided is not None:
-        events.append(Event(type="collision", t_s=t_s, body_id=collided.id,
+        events.append(Event(type=EventType.COLLISION, t_s=t_s, body_id=collided.id,
                             position_m=state.position_m))
         return samples, events, SimulationStatus.COLLISION
 
@@ -268,7 +269,7 @@ def integrate(
                         body_positions_m=hit_positions,
                     ))
                     events.append(Event(
-                        type="collision",
+                        type=EventType.COLLISION,
                         t_s=hit_t_s,
                         body_id=collided.id,
                         position_m=hit_state.position_m,
@@ -307,7 +308,7 @@ def integrate(
                             body_positions_m=hit_positions,
                         ))
                         events.append(Event(
-                            type="collision", t_s=hit_t_s,
+                            type=EventType.COLLISION, t_s=hit_t_s,
                             body_id=half_collided.id, position_m=hit_state.position_m,
                         ))
                         return samples, events, SimulationStatus.COLLISION
