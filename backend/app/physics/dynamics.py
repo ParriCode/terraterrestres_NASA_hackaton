@@ -11,7 +11,10 @@ def state_derivative(
 ) -> tuple[Vec3, Vec3]:
     """Devuelve (velocidad, aceleración) usando los cuerpos del escenario en t_s."""
     bodies = scenario.get_bodies()
-    body_positions_m = {body.id: body.pos(t_s) for body in bodies}
+    body_positions_m = {
+        body.id: body.pos(t_s) 
+        for body in bodies
+    }
     acceleration = gravitational_acceleration(
         state.position_m,
         body_positions_m,
