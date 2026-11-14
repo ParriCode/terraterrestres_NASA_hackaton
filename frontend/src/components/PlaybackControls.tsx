@@ -6,11 +6,11 @@ import Icon from './Icon'
 export type TimeMode = 'live' | 'manual'
 type Props = {
   date: Date; mode: TimeMode; onMode: (mode: TimeMode) => void; journey: Journey | null;
-  playing: boolean; onToggle: () => void; speed: number; onSpeed: (v: number) => void; onDate: (d: Date) => void; onReset: () => void
+  playing: boolean; onToggle: () => void; speed: number; onSpeed: (v: number) => void; onDate: (d: Date) => void; onReset: () => void; onDeselect: () => void
 }
 function localInput(date: Date) { const pad = (v: number) => String(v).padStart(2, '0'); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}` }
 
-export default function PlaybackControls({ date, mode, onMode, journey, playing, onToggle, speed, onSpeed, onDate, onReset }: Props) {
+export default function PlaybackControls({ date, mode, onMode, journey, playing, onToggle, speed, onSpeed, onDate, onReset, onDeselect }: Props) {
   const start = journey ? new Date(journey.launch_iso).getTime() : date.getTime()
   const max = journey?.result.diagnostics.final_time_s ?? 0
   const elapsed = journey ? elapsedAt(journey, date) : 0
@@ -18,10 +18,10 @@ export default function PlaybackControls({ date, mode, onMode, journey, playing,
   return <div className="playback-shell">
     <div className="playback-upper">
       <div className="playback-title"><Icon name="clock" size={16} /><span>LÍNEA TEMPORAL</span></div>
-      <div className="time-mode-buttons" role="group" aria-label="Modo de tiempo">
+      <div className="playback-header-actions"><div className="time-mode-buttons" role="group" aria-label="Modo de tiempo">
         <button className={mode === 'live' ? 'active' : ''} onClick={() => onMode('live')}><span className="pulse-dot" />Ahora</button>
         <button className={mode === 'manual' ? 'active' : ''} onClick={() => onMode('manual')}><Icon name="calendar" size={14} />Fecha</button>
-      </div>
+      </div><button className="playback-close" onClick={onDeselect} aria-label="Deseleccionar misión y ocultar línea temporal" title="Cerrar línea temporal"><Icon name="x" size={14} /></button></div>
     </div>
     <div className="playback-main">
       <button className="play-main-button" onClick={onToggle} disabled={!journey || mode === 'live'} title={playing ? 'Pausar' : 'Reproducir'} aria-label={playing ? 'Pausar' : 'Reproducir'}><Icon name={playing ? 'pause' : 'play'} size={21} /></button>

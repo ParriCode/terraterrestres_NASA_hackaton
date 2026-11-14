@@ -28,7 +28,7 @@ export function journeyProgress(journey: Journey, date: Date) {
 function lerpVec(a: Vec3, b: Vec3, f: number): Vec3 {
   return [0, 1, 2].map(i => a[i] + (b[i] - a[i]) * f) as Vec3
 }
-/** Interpolación sólo GRÁFICA de muestras devueltas por Python*/
+/** Interpolación sólo GRÁFICA de muestras devueltas por Python */
 export function sampleAt(samples: TrajectorySample[], t: number): TrajectorySample | null {
   if (!samples.length) return null
   if (t <= samples[0].t_s) return samples[0]
@@ -62,7 +62,11 @@ export function projectRelativeToEarth(sample: TrajectorySample, metersToPixels:
   }
 }
 export function downloadJourney(journey: Journey) {
-  const blob = new Blob([JSON.stringify({ origin: journey.source, launch_iso: journey.launch_iso, result: journey.result }, null, 2)], { type: 'application/json' })
+  const blob = new Blob([JSON.stringify({
+    origin: journey.source, launch_iso: journey.launch_iso,
+    route_kind: journey.route_kind ?? 'earth_moon', optimization_goal: journey.optimization_goal,
+    min_flyby_altitude_km: journey.min_flyby_altitude_km, science: journey.science, result: journey.result
+  }, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a'); anchor.href = url
   anchor.download = `${journey.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-') || 'viaje'}.json`

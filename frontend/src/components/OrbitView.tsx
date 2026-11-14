@@ -34,7 +34,7 @@ function pathFor(samples: TrajectorySample[], maxTime: number) {
 }
 
 /** Vista esquemática de rutas Tierra–Luna en la panorámica (NO escala física) */
-function schematicSolarRoute(origin: { x: number; y: number }, index: number, progress: number) {
+function schematicSolarRoute(origin: { x: number; y: number }, index: number, progress: number, freeReturn = false) {
   const angle = -1.3 + index * 1.16
   const length = 72 + (index % 3) * 19
   const end = { x: origin.x + Math.cos(angle) * length, y: origin.y + Math.sin(angle) * length * .85 }
@@ -49,13 +49,23 @@ function schematicSolarRoute(origin: { x: number; y: number }, index: number, pr
       y: s * s * s * origin.y + 3 * s * s * t * c1.y + 3 * s * t * t * c2.y + t * t * t * end.y
     }
   }
-  const points = Array.from({ length: 61 }, (_, i) => ({ t: i / 60, ...at(i / 60) }))
+  const back1 = { x: end.x + normal.x * .8 + 19, y: end.y + normal.y * .8 - 6 }
+  const back2 = { x: origin.x - normal.x * .8 - 22, y: origin.y - normal.y * .8 + 4 }
+  const returnAt = (t: number) => {
+    const s = 1 - t
+    return {
+      x: s * s * s * end.x + 3 * s * s * t * back1.x + 3 * s * t * t * back2.x + t * t * t * origin.x,
+      y: s * s * s * end.y + 3 * s * s * t * back1.y + 3 * s * t * t * back2.y + t * t * t * origin.y
+    }
+  }
+  const pointAt = (t: number) => freeReturn ? t <= .5 ? at(t * 2) : returnAt((t - .5) * 2) : at(t)
+  const points = Array.from({ length: 61 }, (_, i) => ({ t: i / 60, ...pointAt(i / 60) }))
   const draw = (arr: typeof points) => arr.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ')
   const past = points.filter(p => p.t <= progress)
   const future = points.filter(p => p.t > progress)
   if (!past.length) past.push(points[0])
   if (future.length) future.unshift(past[past.length - 1])
-  return { past: draw(past), future: draw(future), tip: at(progress) }
+  return { past: draw(past), future: draw(future), tip: pointAt(clamp(progress, 0, 1)) }
 }
 
 export default function OrbitView({ date, journeys, selectedJourneyId, onSelectJourney, ephemeris, focusEarthSignal }: Props) {
@@ -109,6 +119,7 @@ export default function OrbitView({ date, journeys, selectedJourneyId, onSelectJ
   }
   function pointerDown(e: PointerEvent<SVGSVGElement>) {
     if (e.button !== 0) return
+    e.preventDefault() // Inicia movimiento, no selección de texto nativa
     const p = positionFromPointer(e)
     drag.current = { x: p.x, y: p.y, camera, moved: false }
     e.currentTarget.setPointerCapture(e.pointerId)
@@ -139,7 +150,7 @@ export default function OrbitView({ date, journeys, selectedJourneyId, onSelectJ
 
   return <div className="orbital-stage">
     <svg ref={svg} className="orbital-svg" viewBox="0 0 1400 790" preserveAspectRatio="xMidYMid meet"
-      onWheel={wheel} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}
+      onWheel={wheel} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp} onLostPointerCapture={pointerUp} onDragStart={e => e.preventDefault()}
       role="img" aria-label={scope === 'solar' ? 'Vista interactiva del sistema solar' : 'Vista Tierra y Luna con trayectorias'}>
       <defs>
         <radialGradient id="space-grad"><stop offset="0" stopColor="#11213c" /><stop offset="0.6" stopColor="#091428" /><stop offset="1" stopColor="#050b18" /></radialGradient>
@@ -159,7 +170,7 @@ export default function OrbitView({ date, journeys, selectedJourneyId, onSelectJ
           <circle cx={MID.x} cy={MID.y} r="20" fill="#f6a43d" opacity=".12" pointerEvents="none" />
           <text x={MID.x} y={MID.y + 49} className="planet-label">Sol</text>
           {visibleJourneys.map((j, idx) => {
-            const route = schematicSolarRoute(earth.point, idx, elapsedAt(j, date) / Math.max(1, j.result.diagnostics.final_time_s))
+            const route = schematicSolarRoute(earth.point, idx, elapsedAt(j, date) / Math.max(1, j.result.diagnostics.final_time_s), j.route_kind === 'lunar_free_return')
             return <g key={`overview-${j.id}`} className="schematic-route">
               <path d={route.future} fill="none" stroke={j.color} strokeWidth="1.8" strokeDasharray="5 6" strokeOpacity=".65" />
               <path d={route.past} fill="none" stroke={j.color} strokeWidth="2.5" strokeOpacity=".95" />
