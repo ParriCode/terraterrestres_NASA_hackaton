@@ -11,6 +11,7 @@ from app.services.mars_optimizer import (
     build_tradeoff,
     departure_perigee_state,
     hyperbolic_delta_v,
+    mars_sample_times,
     screen_lambert,
 )
 
@@ -75,3 +76,14 @@ def test_screening_recovers_hohmann_for_circular_coplanar_orbits():
     assert 5.5e3 < best.total_delta_v_m_s < 6.3e3
     curve = build_tradeoff(cands)
     assert [p.duration_s for p in curve] == sorted(p.duration_s for p in curve)
+
+
+def test_mars_sample_times_dense_near_both_ends():
+    T = 260 * 86400.0
+    ts = mars_sample_times(T, 400)
+    assert ts[0] == 0.0 and ts[-1] == T and np.all(np.diff(ts) > 0)
+    assert 300 <= len(ts) <= 402
+    # Escape de la Tierra y llegada a Marte con muchas muestras (antes: ~1 cada 0,65 días).
+    assert np.sum(ts <= 2 * 86400) >= 60
+    assert np.sum(ts >= T - 2 * 86400) >= 50
+    assert np.array_equal(mars_sample_times(T, 20), np.linspace(0.0, T, 20))

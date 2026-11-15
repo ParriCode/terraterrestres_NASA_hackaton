@@ -5,7 +5,7 @@ import type { IconDefinition } from '@fortawesome/fontawesome-svg-core'
 import {
   faXmark, faPlus, faMinus, faCrosshairs, faPlay, faPause, faRotateLeft, faRocket, faClock,
   faEarthAmericas, faLayerGroup, faTriangleExclamation, faSatellite, faBullseye,
-  faBars, faEye, faEyeSlash, faTrashCan, faArrowLeft, faArrowRight, faInfoCircle,
+  faBars, faEye, faEyeSlash, faTrashCan, faArrowLeft, faArrowRight, faInfoCircle, faSun,
 } from '@fortawesome/free-solid-svg-icons'
 
 const ICONS = {
@@ -13,7 +13,7 @@ const ICONS = {
   rotate: faRotateLeft, rocket: faRocket, clock: faClock, globe: faEarthAmericas, layers: faLayerGroup,
   alert: faTriangleExclamation, orbit: faSatellite, target: faBullseye, bars: faBars,
   eye: faEye, 'eye-off': faEyeSlash, trash: faTrashCan, back: faArrowLeft, arrow: faArrowRight,
-  info: faInfoCircle,
+  info: faInfoCircle, sun: faSun,
 } satisfies Record<string, IconDefinition>
 
 type Props = { name: keyof typeof ICONS; size?: number; className?: string; style?: CSSProperties }

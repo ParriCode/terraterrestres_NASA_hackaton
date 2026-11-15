@@ -169,6 +169,26 @@ def arrival_periapsis_direction(v_inf_vec: np.ndarray, mu_m3_s2: float, r_p_m: f
     return math.cos(beta) * s_hat - math.sin(beta) * p_hat
 
 
+def mars_sample_times(duration_s: float, count: int) -> np.ndarray:
+    """Malla de muestreo para dibujar la transferencia (no afecta a la física).
+
+    Con una malla uniforme de ~0,65 días el escape desde LEO y la llegada a Marte quedan en
+    1–2 segmentos rectos. Se reparten ~25 % de las muestras en los 4 primeros días y ~20 %
+    en los 3 últimos con espaciado geométrico (más denso junto a la Tierra y al periapsis),
+    y el resto uniforme. Devuelve tiempos únicos y ordenados en [0, duration_s].
+    """
+    count = max(2, int(count))
+    if count < 40 or duration_s <= 10 * DAY_S:
+        return np.linspace(0.0, duration_s, count)
+    n_dep, n_arr = int(count * 0.25), int(count * 0.20)
+    n_mid = count - n_dep - n_arr
+    dep = np.geomspace(60.0, 4 * DAY_S, n_dep)
+    arr = duration_s - np.geomspace(60.0, 3 * DAY_S, n_arr)
+    mid = np.linspace(0.0, duration_s, n_mid)
+    ts = np.unique(np.concatenate(([0.0, duration_s], dep, arr, mid)))
+    return ts[(ts >= 0.0) & (ts <= duration_s)]
+
+
 # --------------------------------------------------------------------------- 1. cribado
 
 

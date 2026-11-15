@@ -3,12 +3,14 @@ import './App.css'
 import { ApiError, requestTransfer } from './api/transfers'
 import Icon from './components/Icon'
 import PlaybackControls from './components/PlaybackControls'
+import SolarSystemView from './components/SolarSystemView'
 import TransferForm from './components/TransferForm'
 import TransferSummary from './components/TransferSummary'
 import TransferView from './components/TransferView'
 import type { TransferRequest, TransferResponse } from './types/transfer'
 import { formatDuration, formatUtc, stateAt } from './utils/transfer'
 
+type Scene = 'solar' | 'earth'
 type Journey = { id: string; title: string; response: TransferResponse; visible: boolean; color: string }
 const COLORS = ['#64ead5', '#f7ba68', '#80aaff', '#f297c1', '#cc9eff', '#7cd6ff']
 
@@ -16,6 +18,8 @@ export default function App() {
   const [journeys, setJourneys] = useState<Journey[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(true)
+  // Dos vistas: sistema solar (heliocéntrica) y Tierra–Luna. Por defecto, la de siempre.
+  const [scene, setScene] = useState<Scene>('earth')
   const [showDrawer, setShowDrawer] = useState(false)
   const [showResults, setShowResults] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -61,6 +65,7 @@ export default function App() {
       setJourneys(prev => [...prev, { id, title, response: result, color: COLORS[prev.length % COLORS.length], visible: true }])
       setSelectedId(id); setTime(0); setShowForm(false); setShowDrawer(false); setShowResults(true)
       setSpeed(result.destination === 'mars' ? 604800 : 21600)
+      setScene(result.destination === 'mars' ? 'solar' : 'earth')
     } catch (e) {
       if (signal.signal.aborted) return
       setError(e instanceof ApiError || e instanceof Error ? e.message : 'Error desconocido al calcular la transferencia.')
@@ -72,7 +77,9 @@ export default function App() {
   function cancel() { controller.current?.abort(); controller.current = null; setBusy(false) }
   function selectJourney(id: string) {
     setSelectedId(id); setTime(0); setPlaying(false)
-    setSpeed(journeys.find(j => j.id === id)?.response.destination === 'mars' ? 604800 : 21600)
+    const isMars = journeys.find(j => j.id === id)?.response.destination === 'mars'
+    setSpeed(isMars ? 604800 : 21600)
+    setScene(isMars ? 'solar' : 'earth')
     setShowDrawer(false); setShowForm(false); setShowResults(true)
   }
   function deleteJourney(id: string) {
@@ -101,8 +108,17 @@ export default function App() {
       </div>
     </header>
     <main className="stage">
-      <TransferView date={sceneDate} transfer={transfer} state={state} time={time}
-        visible={selected?.visible ?? false} color={selected?.color} />
+      {scene === 'solar'
+        ? <SolarSystemView date={sceneDate} transfer={transfer} state={state}
+            visible={selected?.visible ?? false} color={selected?.color} onEarth={() => setScene('earth')} />
+        : <TransferView date={sceneDate} transfer={transfer} state={state} time={time}
+            visible={selected?.visible ?? false} color={selected?.color} />}
+      <div className="scene-nav" role="tablist" aria-label="Vista del mapa">
+        <button type="button" role="tab" aria-selected={scene === 'solar'} className={scene === 'solar' ? 'scene-tab active' : 'scene-tab'}
+          onClick={() => setScene('solar')}><Icon name="sun" size={14} />Sistema solar</button>
+        <button type="button" role="tab" aria-selected={scene === 'earth'} className={scene === 'earth' ? 'scene-tab active' : 'scene-tab'}
+          onClick={() => setScene('earth')}><Icon name="globe" size={14} />Tierra–Luna</button>
+      </div>
       {showForm && <div className="mission-panel panel-surface" aria-label="Configuración de transferencia">
         <button className="panel-close" type="button" onClick={() => setShowForm(false)} aria-label="Cerrar formulario"><Icon name="x" size={16} /></button>
         <TransferForm busy={busy} onSubmit={calculate} onCancel={cancel} onDateChange={setPreviewDate} />
@@ -127,7 +143,7 @@ export default function App() {
           onToggle={togglePlayback} onReset={() => { setPlaying(false); setTime(0) }}
           onTime={t => { setPlaying(false); setTime(t) }} onSpeed={setSpeed} />
       </div>}
-      <div className="source-disclaimer">{transfer?.destination === 'mars' ? 'Sistema solar interior: posiciones de Sol, Tierra y Marte y trayectoria devueltas por el backend (JPL Horizons).' : transfer ? 'Tierra–Luna: posiciones de los cuerpos y trayectoria devueltas por el backend. Sol: dirección JPL consultada aparte.' : 'Tierra–Luna: posiciones NASA/JPL Horizons; sin simulación de nave hasta crear una misión.'}</div>
+      <div className="source-disclaimer">{scene === 'solar' ? (transfer?.destination === 'mars' ? 'Nave, Tierra y Marte: JPL Horizons (backend). Otros planetas: elementos orbitales medios JPL.' : 'Planetas: elementos orbitales medios JPL (error < 0,01° en los interiores).') : transfer?.destination === 'mars' ? 'Tierra–Luna: salida hacia Marte con posiciones y trayectoria devueltas por el backend.' : transfer ? 'Tierra–Luna: posiciones de los cuerpos y trayectoria devueltas por el backend. Sol: dirección JPL consultada aparte.' : 'Tierra–Luna: posiciones NASA/JPL Horizons; sin simulación de nave hasta crear una misión.'}</div>
     </main>
     {showDrawer && <>
       <button className="drawer-backdrop" aria-label="Cerrar menú de viajes" onClick={() => setShowDrawer(false)} />

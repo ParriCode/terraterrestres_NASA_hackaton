@@ -26,6 +26,7 @@ from app.services.mars_optimizer import (
     DEFAULT_MARS_PERIAPSIS_ALT_M,
     MIN_DURATION_S as MARS_MIN_DURATION_S,
     NoFeasibleMarsTransfer,
+    mars_sample_times,
     optimize_mars_transfer,
 )
 
@@ -158,9 +159,13 @@ def _time_grid(trajectory, duration_s: float, count: int) -> np.ndarray:
     return ts
 
 
-def _serialize_samples(trajectory, duration_s: float, count: int) -> list[dict]:
-    """Muestreo vectorizado de las soluciones densas y de splines de Horizons."""
-    ts = _time_grid(trajectory, duration_s, count)
+def _serialize_samples(trajectory, duration_s: float, count: int, times: np.ndarray | None = None) -> list[dict]:
+    """Muestreo vectorizado de las soluciones densas y de splines de Horizons.
+
+    ``times`` permite una malla propia (Marte); si se omite, se usa ``_time_grid`` como siempre.
+    """
+    ts = _time_grid(trajectory, duration_s, count) if times is None else np.asarray(times, dtype=np.float64)
+    count = len(ts)
     if hasattr(trajectory, "_segments"):
         # Los cambios de velocidad en LOI/TEI son impulsos: el lado derecho
         # del salto prevalece en el instante de la maniobra.
@@ -363,7 +368,8 @@ def _optimize_mars(request: OptimizeTransferRequest) -> dict:
     earth = result.scenario.bodies["earth"]
     v0 = result.speed(0.0)
     v_rel = float(np.linalg.norm(np.subtract(v0, earth.velocity(0.0))))
-    samples = _serialize_samples(result, result.duration_s, request.samples)
+    samples = _serialize_samples(result, result.duration_s, request.samples,
+                                 times=mars_sample_times(result.duration_s, request.samples))
     path = sum(float(np.linalg.norm(np.subtract(b["position_m"], a["position_m"]))) for a, b in zip(samples, samples[1:]))
     prop = result.propellant
     return {
