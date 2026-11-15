@@ -27,7 +27,12 @@ from app.services.transfer_service import (
 )
 
 SECONDS_DAY = 86400.0
-RETURN_INTERFACE_M = 100_000_000.0  # 100.000 km desde el centro terrestre
+EARTH_ENTRY_ALTITUDE_M = 120_000.0  # interfaz de entrada; no simula descenso ni aterrizaje
+
+
+def _entry_radius_m(scenario: Any) -> float:
+    """Radio absoluto del objetivo a partir del radio terrestre del escenario."""
+    return float(scenario.bodies['earth'].radius_m) + EARTH_ENTRY_ALTITUDE_M
 MIN_ORBIT_CLEARANCE_M = 20_000.0
 
 
@@ -116,7 +121,7 @@ def _checked_arc(scenario: Any, solution: Any, t0: float, t1: float, phase: str)
 
 def _direct_return_candidates(scenario: Any, t_depart: float, t_limit: float,
                               state: np.ndarray, *, deadline: float, objective: str):
-    """Busca un primer cruce entrante de la esfera terrestre ANTES del límite.
+    """Busca un cruce entrante a 120 km de altitud terrestre ANTES del límite.
 
     Los impulsos se evalúan en el modelo gravitatorio real, sin exigir
     artificialmente que la nave llegue justo el último día elegido.
@@ -124,6 +129,7 @@ def _direct_return_candidates(scenario: Any, t_depart: float, t_limit: float,
     eventos de impacto. La búsqueda sigue siendo acotada, no óptima global.
     """
     earth, moon = scenario.bodies['earth'], scenario.bodies['moon']
+    entry_radius_m = _entry_radius_m(scenario)
     earth_at_depart = np.asarray(earth.pos(t_depart)[:2], dtype=float)
     moon_velocity = np.asarray(moon.speed(t_depart)[:2], dtype=float)
     to_earth = earth_at_depart - state[:2]
@@ -146,7 +152,7 @@ def _direct_return_candidates(scenario: Any, t_depart: float, t_limit: float,
                     scenario, state[:2], v, t_depart, t_limit,
                     events=True, dense_output=False, rtol=2e-8, atol=1e-4,
                     budget_check=lambda: _check_deadline(deadline),
-                    stop_at_earth_radius_m=RETURN_INTERFACE_M,
+                    stop_at_earth_radius_m=entry_radius_m,
                 )
                 if not len(rough.t_events[-1]):
                     continue
@@ -155,7 +161,7 @@ def _direct_return_candidates(scenario: Any, t_depart: float, t_limit: float,
                     scenario, state[:2], v, t_depart, t_limit,
                     events=True, dense_output=True, rtol=1e-10, atol=1e-6,
                     budget_check=lambda: _check_deadline(deadline),
-                    stop_at_earth_radius_m=RETURN_INTERFACE_M,
+                    stop_at_earth_radius_m=entry_radius_m,
                 )
                 if not len(fine.t_events[-1]):
                     continue
@@ -164,7 +170,7 @@ def _direct_return_candidates(scenario: Any, t_depart: float, t_limit: float,
                 r_end, v_end = _relative(earth, arrival_t, np.asarray(fine.y[:, -1]))
                 if np.dot(r_end, v_end) >= 0:
                     continue
-                if abs(np.linalg.norm(r_end) - RETURN_INTERFACE_M) > 50_000.:
+                if abs(np.linalg.norm(r_end) - entry_radius_m) > 50_000.:
                     continue
                 dv = float(np.linalg.norm(v - state[2:4]))
                 if objective == 'energia':
@@ -193,6 +199,7 @@ def _direct_return_candidates(scenario: Any, t_depart: float, t_limit: float,
 def _return_solution(scenario: Any, t_depart: float, t_end: float, state: np.ndarray, *,
                      deadline: float, objective: str):
     earth, moon = scenario.bodies['earth'], scenario.bodies['moon']
+    entry_radius_m = _entry_radius_m(scenario)
     e_end = np.array(earth.pos(t_end)[:2])
     m_end = np.array(moon.pos(t_end)[:2])
     radial = (m_end - e_end) / np.linalg.norm(m_end - e_end)
@@ -216,13 +223,13 @@ def _return_solution(scenario: Any, t_depart: float, t_end: float, state: np.nda
 
     best = None
     best_score = float('inf')
-    # Fallback: disparo a un punto concreto de la esfera, al final del plazo.
+    # Fallback: disparo hacia la interfaz de entrada, al final del plazo.
     for deg in (0, -45, 45, -90, 90, 180):
         if time.monotonic() >= deadline:
             break
         angle = math.radians(deg)
         unit = radial * math.cos(angle) + np.array([-radial[1], radial[0]]) * math.sin(angle)
-        target = e_end + RETURN_INTERFACE_M * unit
+        target = e_end + entry_radius_m * unit
         residual = _build_fast_shooting_residual(
             scenario,
             (float(state[0]), float(state[1]), 0.0),
@@ -242,7 +249,7 @@ def _return_solution(scenario: Any, t_depart: float, t_end: float, state: np.nda
             try:
                 lam = solve_lambert(
                     (float(start_rel[0]), float(start_rel[1]), 0.0),
-                    (float(RETURN_INTERFACE_M * unit[0]), float(RETURN_INTERFACE_M * unit[1]), 0.0),
+                    (float(entry_radius_m * unit[0]), float(entry_radius_m * unit[1]), 0.0),
                     flight_s, earth.mu_m3_s2, prograde=prograde,
                 )
                 seeds.append(tuple(float(v) for v in (
@@ -280,7 +287,7 @@ def _return_solution(scenario: Any, t_depart: float, t_end: float, state: np.nda
                 probe = np.linspace(t_depart, t_end, 180)[:-1]
                 ep = getattr(earth, 'pos_array', None)
                 centers = ep(probe)[:, :2] if callable(ep) else np.array([earth.pos(float(t))[:2] for t in probe])
-                if np.any(np.linalg.norm(sol.sol(probe)[:2].T - centers, axis=1) < RETURN_INTERFACE_M - 10_000.0):
+                if np.any(np.linalg.norm(sol.sol(probe)[:2].T - centers, axis=1) < entry_radius_m - 10_000.0):
                     continue
                 dv = float(np.linalg.norm(v - state[2:4]))
                 # Respetar el objetivo: energía de maniobra o distancia recorrida.
@@ -350,10 +357,12 @@ def design_lunar_orbit_return(
         raise ValueError('Para orbitar y regresar, la duración total debe estar entre 4 y 30 días.')
     if not 50.0 <= orbit_altitude_km <= 500.0:
         raise ValueError('La órbita lunar debe estar entre 50 y 500 km de altitud.')
-    if lunar_revolutions not in (1, 2):
-        raise ValueError('Solo se admiten 1 o 2 revoluciones lunares en esta versión.')
-    if not 2 <= samples <= 4000 or not mass_kg > 0 or not math.isfinite(mass_kg):
-        raise ValueError('Masa y muestras inválidas.')
+    if isinstance(lunar_revolutions, bool) or not isinstance(lunar_revolutions, int) or not 1 <= lunar_revolutions <= 100:
+        raise ValueError('lunar_revolutions debe ser un entero entre 1 y 100.')
+    if not 100 <= samples <= 4000 or not mass_kg > 0 or not math.isfinite(mass_kg):
+        raise ValueError('Se requieren entre 100 y 4000 muestras y una masa positiva.')
+    if samples < 12 * lunar_revolutions + 60:
+        raise ValueError('Aumenta las muestras para representar todas las revoluciones.')
     if objective not in ('energia', 'distancia'):
         raise ValueError('Objetivo inválido.')
     deadline = time.monotonic() + time_budget_s
@@ -366,6 +375,7 @@ def design_lunar_orbit_return(
     )
     outbound = outbound_optimized.transfer
     scenario = PlanarScenario(date, duration_s)
+    entry_radius_m = _entry_radius_m(scenario)
     moon = scenario.bodies['moon']
     r_orbit = moon.radius_m + orbit_altitude_km * 1000
     t_capture, y_capture = _find_orbit_entry(outbound, orbit_altitude_km * 1000)
@@ -382,7 +392,7 @@ def design_lunar_orbit_return(
     _checked_arc(scenario, lunar_solution, t_capture, t_depart, 'órbita lunar')
     moon_cent = np.array(moon.pos(t_depart)[:2])
     final_orbit_radius = np.linalg.norm(lunar_solution.y[:2, -1] - moon_cent)
-    orbit_check_times = np.linspace(t_capture, t_depart, 220 * lunar_revolutions)
+    orbit_check_times = np.linspace(t_capture, t_depart, max(220, 24 * lunar_revolutions))
     moon_positions = np.array([moon.pos(float(t))[:2] for t in orbit_check_times])
     orbit_positions = lunar_solution.sol(orbit_check_times)[:2].T - moon_positions
     orbit_angles = np.unwrap(np.arctan2(orbit_positions[:, 1], orbit_positions[:, 0]))
@@ -409,9 +419,11 @@ def design_lunar_orbit_return(
     ]
     # Respuesta compatible con TransferResponse: muestras de las 3 fases.
     actual_duration = return_arrival_t
-    n_out = max(30, round(samples * t_capture / actual_duration))
-    n_moon = max(65 * lunar_revolutions, round(samples * (t_depart - t_capture) / actual_duration))
-    n_return = max(30, samples - n_out - n_moon + 2)
+    # Conservar el total de muestras, dando prioridad al tramo lunar.
+    n_moon = min(samples - 60, max(36, 12 * lunar_revolutions, round(samples * (t_depart - t_capture) / actual_duration)))
+    remaining = samples - n_moon
+    n_out = min(remaining - 30, max(30, round(remaining * t_capture / max(actual_duration - (t_depart - t_capture), 1))))
+    n_return = samples - n_out - n_moon
     # Eliminar el estado anterior a cada impulso en el mismo instante. Los
     # eventos exponen ambas velocidades; la serie de muestras crece estrictamente.
     out_times = np.linspace(0, t_capture, n_out)
@@ -424,8 +436,17 @@ def design_lunar_orbit_return(
     ship = np.array([s['position_m'][:2] for s in all_samples])
     earths = np.array([s['body_positions_m']['earth'][:2] for s in all_samples])
     path_len = float(np.linalg.norm(np.diff(ship - earths, axis=0), axis=1).sum())
-    e_end = np.array(scenario.bodies['earth'].pos(actual_duration)[:2])
-    arrival_error = abs(float(np.linalg.norm(sol_return.y[:2, -1] - e_end)) - RETURN_INTERFACE_M)
+    earth_body = scenario.bodies['earth']
+    e_end = np.array(earth_body.pos(actual_duration)[:2])
+    earth_speed = np.array(earth_body.speed(actual_duration)[:2])
+    state_at_entry = np.asarray(sol_return.y[:, -1], dtype=float)
+    earth_relative_r = state_at_entry[:2] - e_end
+    earth_relative_v = state_at_entry[2:4] - earth_speed
+    entry_speed_m_s = float(np.linalg.norm(earth_relative_v))
+    inbound = bool(np.dot(earth_relative_r, earth_relative_v) < 0)
+    if not inbound or abs(np.linalg.norm(earth_relative_r) - entry_radius_m) > 50_000.:
+        raise TransferNotFoundError('No se verificó la llegada entrante a 120 km de altitud terrestre.')
+    arrival_error = abs(float(np.linalg.norm(sol_return.y[:2, -1] - e_end)) - entry_radius_m)
     return {
         'source': 'NASA/JPL Horizons', 'date': date,
         'frame': 'earth_moon_barycentric_initial_orbital_plane',
@@ -441,7 +462,14 @@ def design_lunar_orbit_return(
         'bodies': {k: {'name': body.name, 'radius_m': body.radius_m} for k, body in scenario.bodies.items()},
         'samples': all_samples,
         'mission_mode': 'lunar_orbit_return',
-        'return_interface_radius_m': RETURN_INTERFACE_M,
+        'return_interface_radius_m': entry_radius_m,
+        'earth_entry': {
+            'altitude_km': EARTH_ENTRY_ALTITUDE_M / 1000.0,
+            'relative_speed_m_s': entry_speed_m_s,
+            'inbound': inbound,
+            'validated': True,
+            'landing_simulated': False,
+        },
         'lunar_orbit': {
             'altitude_km': orbit_altitude_km,
             'revolutions': lunar_revolutions,
@@ -459,7 +487,7 @@ def design_lunar_orbit_return(
             'La optimización es por etapas, no una búsqueda conjunta global de todos los impulsos.',
             'Modelo gravitatorio planar Tierra-Luna con efemérides prescritas de NASA/JPL.',
             'Inserción y salida lunares mediante impulsos ideales; sin presupuesto de combustible.',
-            'Retorno a esfera geocéntrica de 100.000 km, NO reentrada ni aterrizaje.',
+            'Regreso validado a 120 km de altitud sobre Tierra; NO se simula atmósfera ni aterrizaje.',
             'Búsqueda acotada: no se garantiza óptimo global.',
             'La duración introducida es un límite máximo: el regreso puede completarse antes.',
         ],

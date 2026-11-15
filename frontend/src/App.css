@@ -390,6 +390,13 @@
     min-height: 39px
 }
 
+.transfer-form .form-help {
+    color: #859db7;
+    font-size: 10px;
+    font-weight: 450;
+    line-height: 1.45;
+}
+
 .transfer-form fieldset {
     border: 0;
     margin: 0;
@@ -1054,50 +1061,11 @@
         transition-duration: .01ms !important
     }
 }
-.transfer-form select { width: 100%; padding: 10px; border: 1px solid #35506a; border-radius: 8px; background: #101f30; color: #eef6ff; }
+/* Tres estrategias sin romper los controles de objetivos de dos columnas. */
+.segmented.mission-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.segmented.mission-modes button { white-space: normal; min-height: 42px; }
 
-.mission-failure {
-    width: min(540px, calc(100vw - 32px));
-    box-sizing: border-box;
-    max-height: calc(100dvh - 32px);
-    overflow-y: auto;
-    padding: clamp(24px, 4vw, 40px);
-    border: 1px solid #b77d47;
-    border-top: 4px solid #ffbd69;
-    border-radius: 22px;
-    background: #101e30;
-    color: #ecf3fa;
-    box-shadow: 0 24px 100px #0009;
-}
-.mission-failure::backdrop { background: #020916c9; backdrop-filter: blur(6px); }
-.failure-close { position: absolute; top: 14px; right: 14px; }
-.failure-visual { display: block; width: 100%; height: auto; margin: 4px 0 18px; border-radius: 14px; background: radial-gradient(circle at 30% 20%, #1b3554, #0a1524 70%); border: 1px solid #2a4058; }
-.failure-visual text { fill: #b8c9dc; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
-.mf-path { fill: none; stroke: #ffbd69; stroke-width: 2.2; stroke-dasharray: 7 7; animation: mf-dash 1.4s linear infinite; }
-.mf-path-glow { fill: none; stroke: #ffbd6922; stroke-width: 9; }
-.mf-target-ring { fill: none; stroke: #ff6b6b; stroke-width: 1.5; stroke-dasharray: 4 5; animation: mf-pulse 2s ease-in-out infinite; transform-origin: 380px 70px; }
-.mf-miss line { stroke: #ff6b6b; stroke-width: 3; stroke-linecap: round; }
-@keyframes mf-dash { to { stroke-dashoffset: -28; } }
-@keyframes mf-pulse { 50% { transform: scale(1.12); opacity: .5; } }
-@media (prefers-reduced-motion: reduce) { .mf-path, .mf-target-ring { animation: none; } .mf-ship { display: none; } }
-.failure-symbol { display: grid; place-items: center; width: 68px; height: 68px; border-radius: 20px; background: #ffbd691a; border: 1px solid #ffbd6955; color: #ffbd69; margin-bottom: 22px; }
-.failure-eyebrow { color: #ffbd69; font-size: 11px; font-weight: 800; letter-spacing: .15em; }
-.mission-failure h2 { font-size: clamp(24px, 4vw, 30px); line-height: 1.2; margin: 10px 0 16px; }
-.mission-failure p { line-height: 1.6; }
-#mission-failure-description, .failure-hint { color: #b8c9dc; font-size: 14px; }
-.failure-trip { display: flex; flex-direction: column; gap: 9px; padding: 18px; margin: 22px 0; border: 1px solid #34485e; background: #172a40; border-radius: 12px; }
-.failure-trip strong { font-size: 19px; }
-.failure-trip strong span { color: #ffbd69; margin: 0 8px; }
-.failure-trip > span { color: #b8c9dc; font-size: 13px; }
-.failure-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
-.failure-actions button { flex: 1 1 180px; min-height: 46px; }
-.failure-actions .primary-button { background: #ffbd69; color: #17202b; }
-.failure-details { margin-top: 22px; font-size: 12px; color: #a6bbd0; overflow-wrap: anywhere; }
-.failure-details summary { cursor: pointer; padding: 5px 0; }
-.mission-failure button:focus-visible, .failure-details summary:focus-visible { outline: 3px solid #fff; outline-offset: 4px; }
-
-
-/* Vista espacial 3D integrada en desarrollo-jose */
+/* Indicador solar contextual. Fuera de escala, no añade un tercer cuerpo visible. */
 .sun-indicator {
   position: absolute;
   top: 18px;
@@ -1126,142 +1094,3 @@
   .scene-heading-local { top: 77px; }
   .map-tools { top: 125px; }
 }
-
-/* VISOR ORBITAL4B 3D - WebGL, independiente de librerías externas */
-
-.space-canvas {
-    display: block;
-    width: 100%;
-    height: 100%;
-    cursor: grab;
-    outline: none;
-    touch-action: none;
-    background: #020611;
-}
-.space-canvas:active { cursor: grabbing; }
-.transfer-view-3d { isolation: isolate; }
-.space-label {
-    position: absolute;
-    transform: translate(-50%, calc(-100% - var(--object-offset, 17px)));
-    pointer-events: none;
-    z-index: 2;
-    padding: 5px 9px;
-    border: 1px solid rgba(156, 196, 243, .31);
-    border-radius: 7px;
-    background: rgba(3, 15, 32, .76);
-    color: #e8f4ff;
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 1.3px;
-    white-space: nowrap;
-    box-shadow: 0 4px 24px #0006;
-}
-.space-label::after {
-    content: '';
-    position: absolute;
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background: currentColor;
-    left: calc(50% - 2px);
-    bottom: -10px;
-    box-shadow: 0 0 9px currentColor;
-}
-.space-label-earth { color: #77c8ff; }
-.space-label-moon { color: #e1e5f0; }
-.space-label-ship { color: #76f9dc; }
-.space-dimension {
-    display: inline-block;
-    margin-left: 8px;
-    border: 1px solid #58dbd0;
-    border-radius: 4px;
-    padding: 3px 6px;
-    font-size: 9px;
-    color: #a2fdf0;
-    background: rgba(18, 78, 88, .42);
-}
-.space-heading { max-width: 390px; z-index: 3; }
-.space-sun { z-index: 3; }
-.space-controls { z-index: 11; }
-.space-control-divider { height: 1px; background: #344a65; margin: 2px 5px; }
-.space-target { font-size: 18px; }
-.space-view-options {
-    position: absolute;
-    right: 19px;
-    bottom: 83px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    z-index: 7;
-    padding: 10px 12px;
-    background: rgba(7, 21, 39, .86);
-    border: 1px solid #33506d;
-    border-radius: 11px;
-    font-size: 11px;
-    font-weight: 700;
-    color: #cedeee;
-    backdrop-filter: blur(8px);
-}
-.space-view-options label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-.space-view-options input { margin: 0; accent-color: #61ddc9; }
-.space-render-error {
-    position: absolute;
-    left: 50%;
-    top: 46%;
-    transform: translate(-50%, -50%);
-    background: #112039;
-    padding: 20px 24px;
-    border: 1px solid #e59b70;
-    border-radius: 13px;
-    z-index: 10;
-    max-width: 400px;
-    text-align: center;
-}
-.space-render-error p { color: #b5cbe4; font-size: 13px; }
-.space-legend { bottom: 31px; right: 18px; max-width: 75%; }
-@media (max-width: 680px) {
-    .space-heading { top: 18px; left: 16px; max-width: calc(100% - 100px); }
-    .space-heading h1 { font-size: 16px; }
-    .space-heading p { font-size: 10px; }
-    .space-controls { top: 135px; right: 10px; gap: 5px; }
-    .space-controls .icon-button { width: 33px; height: 33px; }
-    .space-view-options { right: 10px; bottom: 83px; font-size: 10px; }
-    .space-label { font-size: 8px; }
-    .space-legend { left: 11px; right: 11px; max-width: 100%; bottom: 27px; font-size: 9px; }
-}
-
-.space-sun-source { color: #acf5d9; font-size: 10px; font-weight: 800; letter-spacing: .6px; }
-
-/* Selector de dimensiones compartido por los dos renderizadores. */
-.scene-switch { top: 16px; left: 50%; z-index: 55; }
-.scene-switch .scene-tab { min-width: 98px; justify-content: center; }
-.scene-switch .scene-tab.active { background: #20544f; color: #abffef; }
-/* Renders físicos inválidos: no se falsea un impacto lunar en el frontend. */
-.space-physics-warning { position:absolute; bottom: 115px; left: 18px; max-width: 390px;
-  padding: 9px 12px; border: 1px solid #daac68; border-radius: 8px;
-  background: rgba(49,34,21,.91); color: #ffe0ad; font-size: 11px; z-index: 12; }
-@media (max-width: 680px) {
-  .scene-switch { top: 13px; left: auto; right: 9px; transform: none; }
-  .scene-switch .scene-tab { min-width: 0; font-size: 10px; padding: 7px 9px; }
-  .space-physics-warning { left: 10px; bottom: 129px; right: 10px; max-width: 100%; }
-  .space-sun { top: 64px; }
-  .space-heading { top: 124px; }
-  .space-controls { top: 204px; }
-}
-
-.view-mode-switch { left: auto; right: 18px; transform: none; top: 17px; z-index: 40; }
-.view-mode-switch .scene-tab { min-width: 93px; }
-.solar-3d-view { position: absolute; inset: 0; overflow: hidden; background: #050c1c; }
-.solar-3d-labels { position: absolute; inset: 0; pointer-events: none; }
-.solar-3d-label { position: absolute; transform: translate(-50%, -50%); pointer-events: auto; cursor: pointer;
-  color: #e9f4ff; text-shadow: 0 1px 8px #020712,0 0 12px #020712; border: 1px solid #385578;
-  border-radius: 9px; background: #09192bcf; padding: 4px 8px; font-size: 11px; white-space: nowrap; }
-.solar-3d-label.is-origin { color: #64ead5; border-color: #64ead5; }
-.solar-3d-label.is-destination { color: #f7ba68; border-color: #f7ba68; }
-.solar-3d-label:hover, .solar-3d-label:focus-visible { background: #1e4263; border-color: #fff; }
-@media(max-width:900px) { .view-mode-switch { left: auto; right: 7px; top: 48px; transform: none; }
-  .view-mode-switch .scene-tab { min-width: 0; padding: 7px 9px; font-size: 10px; } }
-
-/* Brújula solar compatible con el visor 2D original de José. */
-.transfer-2d-sun { top: 18px; left: 18px; }
-@media(max-width:900px){.transfer-2d-sun{top:64px;}}

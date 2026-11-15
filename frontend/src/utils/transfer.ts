@@ -17,7 +17,7 @@ export function findSampleInterval(samples: TransferSample[], time: number): num
 }
 
 /** Tangente de un cuerpo en la muestra i por diferencias centradas (el backend no envía su velocidad). */
-function bodyTangent(samples: TransferSample[], i: number, key: string): Vec3 {
+function bodyTangent(samples: TransferSample[], i: number, key: 'earth' | 'moon'): Vec3 {
   const a = samples[Math.max(0, i - 1)], b = samples[Math.min(samples.length - 1, i + 1)]
   const invDt = 1 / (b.t_s - a.t_s)
   const pa = a.body_positions_m[key], pb = b.body_positions_m[key]
@@ -40,7 +40,7 @@ function hermiteVec3(
  * La nave usa Hermite cúbico con posición y velocidad de cada muestra, coherente
  * con la salida densa del backend; Tierra y Luna, Hermite con tangentes estimadas.
  */
-export function stateAt(samples: TransferSample[], t: number, origin = "earth", destination = "moon"): TransferState {
+export function stateAt(samples: TransferSample[], t: number): TransferState {
   const last = samples.length - 1
   const time = clamp(t, samples[0].t_s, samples[last].t_s)
   const lo = findSampleInterval(samples, time)
@@ -69,13 +69,13 @@ export function stateAt(samples: TransferSample[], t: number, origin = "earth", 
     : [a.velocity_m_s[0], a.velocity_m_s[1], a.velocity_m_s[2]]
 
   const earth = hermiteVec3(
-    a.body_positions_m[origin], bodyTangent(samples, lo, origin),
-    b.body_positions_m[origin], bodyTangent(samples, lo + 1, origin),
+    a.body_positions_m.earth, bodyTangent(samples, lo, 'earth'),
+    b.body_positions_m.earth, bodyTangent(samples, lo + 1, 'earth'),
     h00, h10h, h01, h11h,
   )
   const moon = hermiteVec3(
-    a.body_positions_m[destination], bodyTangent(samples, lo, destination),
-    b.body_positions_m[destination], bodyTangent(samples, lo + 1, destination),
+    a.body_positions_m.moon, bodyTangent(samples, lo, 'moon'),
+    b.body_positions_m.moon, bodyTangent(samples, lo + 1, 'moon'),
     h00, h10h, h01, h11h,
   )
 

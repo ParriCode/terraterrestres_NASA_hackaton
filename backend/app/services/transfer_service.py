@@ -15,7 +15,7 @@ from typing import Callable
 import numpy as np
 from scipy.optimize import least_squares
 
-from app.data.scenarios import PlanarScenario, SolarPlanarScenario
+from app.data.scenarios import PlanarScenario
 from app.models.domain import SpacecraftState, Vec3, validate_positive, validate_vec3
 from app.physics.lambert import LambertError, solve_lambert
 from app.physics.propagation import propagate_planar
@@ -133,15 +133,11 @@ def _build_fast_shooting_residual(
     if propagate_planar is not _DEFAULT_PROPAGATE_PLANAR:
         return None
     bodies_map = getattr(scenario, "bodies", None)
-    if not isinstance(bodies_map, dict) or len(bodies_map) != 2:
+    if not isinstance(bodies_map, dict) or set(bodies_map.keys()) != {"earth", "moon"}:
         return None
 
-    origin_key = getattr(scenario, "origin_id", "earth")
-    destination_key = getattr(scenario, "destination_id", "moon")
-    if origin_key not in bodies_map or destination_key not in bodies_map:
-        return None
-    earth = bodies_map[origin_key]
-    moon = bodies_map[destination_key]
+    earth = bodies_map["earth"]
+    moon = bodies_map["moon"]
     em = getattr(earth, "_motion", None)
     mm = getattr(moon, "_motion", None)
     if em is None or mm is None:
@@ -166,7 +162,7 @@ def _build_fast_shooting_residual(
     x0_1 = float(x0[1])
     tx = float(target[0])
     ty = float(target[1])
-    max_step = min(86400.0 if hasattr(scenario, "origin_id") else 3600.0, (t1 - t0) / 100.0)
+    max_step = min(3600.0, (t1 - t0) / 100.0)
     sqrt = math.sqrt
 
     def accel(t: float, sx: float, sy: float) -> tuple[float, float] | None:
@@ -402,7 +398,7 @@ def F(
     if objetivo not in ("energia", "distancia"):
         raise ValueError("objetivo debe ser energia o distancia.")
 
-    earth, moon = scenario.bodies[getattr(scenario, "origin_id", "earth")], scenario.bodies[getattr(scenario, "destination_id", "moon")]
+    earth, moon = scenario.bodies["earth"], scenario.bodies["moon"]
     earth_pos_t0 = earth.pos(t0)
     moon_pos_t1 = moon.pos(t1)
     if (
@@ -421,8 +417,6 @@ def F(
 
     rel_r1: Vec3 = (x0[0] - earth_pos_t0[0], x0[1] - earth_pos_t0[1], x0[2] - earth_pos_t0[2])
     rel_r2: Vec3 = (x1[0] - moon_pos_t1[0], x1[1] - moon_pos_t1[1], x1[2] - moon_pos_t1[2])
-    if hasattr(scenario, "origin_id"):
-        rel_r2 = tuple(x1[i] - earth_pos_t0[i] - earth.speed(t0)[i] * (t1-t0) for i in range(3))
     tof = t1 - t0
     earth_mu = earth.mu_m3_s2
 
@@ -430,8 +424,8 @@ def F(
     reasons: list[str] = []
 
     body_keys = list(scenario.bodies)
-    earth_index = body_keys.index(earth.id)
-    moon_index = body_keys.index(moon.id)
+    earth_index = body_keys.index("earth")
+    moon_index = body_keys.index("moon")
     length_times: np.ndarray | None = None
     earth_track_xy: np.ndarray | None = None
 
@@ -466,17 +460,6 @@ def F(
         if not shot.converged:
             reasons.append(f"Error de llegada: {shot.residual_norm_m:.1f} m")
             return
-        if hasattr(scenario, "origin_id"):
-            # Remove accumulated long-flight error before final collision validation.
-            def precise_residual(v):
-                trajectory = propagate_planar(scenario, x0, v, t0, t1,
-                    dense_output=False, rtol=1e-11, atol=1e-7, budget_check=budget_check)
-                return (float(trajectory.y[0, -1]-x1[0]), float(trajectory.y[1, -1]-x1[1]), 0.)
-            shot = _solve_planar_shooting_fast(shot.initial_velocity_m_s, precise_residual,
-                arrival_tolerance_m=arrival_tolerance_m / 10, max_evaluations=25)
-            if not shot.converged:
-                reasons.append("No converge la corrección de precisión")
-                return
         vx, vy, vz = shot.initial_velocity_m_s
         if (vx - evx) * nx + (vy - evy) * ny <= 0.0:
             reasons.append("La salida entra en la Tierra")
@@ -490,7 +473,7 @@ def F(
         # Validación final con salida densa completa para C(t) y métricas.
         solution = propagate_planar(
             scenario, x0, shot.initial_velocity_m_s, t0, t1,
-            events=True, dense_output=True, rtol=1e-11 if hasattr(scenario, "origin_id") else 1e-10, atol=1e-7,
+            events=True, dense_output=True, rtol=1e-10, atol=1e-7,
             budget_check=budget_check,
         )
         if len(solution.t_events[earth_index]):
@@ -539,15 +522,6 @@ def F(
             )
         )
 
-    if hasattr(scenario, "origin_id"):
-        # Straight-line excess velocity plus departure escape energy gives a
-        # useful seed even when a long-flight Lambert bracket is unavailable.
-        excess = np.asarray([(x1[i] - x0[i]) / tof - earth.speed(t0)[i] for i in range(3)])
-        magnitude = float(np.linalg.norm(excess))
-        if magnitude > 0:
-            departure = excess * math.sqrt(1 + 2 * earth_mu / (earth.radius_m * magnitude**2))
-            warm_start_velocities = (*warm_start_velocities, tuple(departure + np.asarray(earth.speed(t0))))
-
     for warm_guess in warm_start_velocities:
         if budget_check is not None:
             budget_check()
@@ -595,7 +569,7 @@ def design_transfer(
     if not math.isfinite(launch_angle_deg) or not math.isfinite(arrival_angle_deg):
         raise ValueError("Los ángulos deben ser finitos.")
     scenario = PlanarScenario(date, duration_s, spacing_s=spacing_s)
-    earth, moon = scenario.bodies[getattr(scenario, "origin_id", "earth")], scenario.bodies[getattr(scenario, "destination_id", "moon")]
+    earth, moon = scenario.bodies["earth"], scenario.bodies["moon"]
 
     def surface(body, other, t: float, angle: float) -> Vec3:
         cx, cy, _ = body.pos(t)
@@ -636,9 +610,6 @@ def optimize_transfer(
     objective: str = "energia",
     mass_kg: float = 1.0,
     spacing_s: float = 3600.0,
-    origin_id: str = "earth",
-    destination_id: str = "moon",
-    solar: bool = False,
     time_budget_s: float = 100.0,
     coarse_step_deg: int = 45,
     max_shooting_evaluations: int = 75,
@@ -665,19 +636,13 @@ def optimize_transfer(
     if not isinstance(max_shooting_evaluations, int) or max_shooting_evaluations < 3:
         raise ValueError("max_shooting_evaluations debe ser >= 3.")
 
-    # Share the two ephemeris tables across every candidate.
-    scenario = (SolarPlanarScenario(date, duration_s, origin_id, destination_id, spacing_s)
-                if solar else PlanarScenario(date, duration_s, spacing_s=spacing_s))
-    earth, moon = scenario.bodies[getattr(scenario, "origin_id", "earth")], scenario.bodies[getattr(scenario, "destination_id", "moon")]
+    # Sólo una descarga / proyección de efemérides por petición.
+    scenario = PlanarScenario(date, duration_s, spacing_s=spacing_s)
+    earth, moon = scenario.bodies["earth"], scenario.bodies["moon"]
 
     ex0, ey0, _ = earth.pos(0.0)
     mx0, my0, _ = moon.pos(0.0)
     theta_launch = math.atan2(my0 - ey0, mx0 - ex0) + math.radians(launch_angle_deg)
-    if solar:
-        # Choose a departure surface point facing the estimated intercept velocity.
-        tx, ty, _ = moon.pos(duration_s)
-        vx, vy, _ = earth.speed(0)
-        theta_launch = math.atan2((ty-ey0)/duration_s-vy, (tx-ex0)/duration_s-vx)
     er = earth.radius_m
     start: Vec3 = (ex0 + er * math.cos(theta_launch), ey0 + er * math.sin(theta_launch), 0.0)
 
@@ -777,7 +742,7 @@ def optimize_transfer(
     if best is None or best_angle is None:
         suffix = " (tiempo agotado)" if not complete else ""
         raise TransferNotFoundError(
-            f"No se encontró una transferencia válida para la fecha y duración "
+            f"No se encontró una transferencia Tierra–Luna válida para la fecha y duración "
             f"indicadas, tras evaluar {len(attempted)} ángulos{suffix}."
         )
     return OptimizedTransfer(

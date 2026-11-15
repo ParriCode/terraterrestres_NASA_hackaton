@@ -8,11 +8,13 @@ import csv
 from datetime import datetime, timezone
 from functools import lru_cache
 import io
+import json
 import math
 from urllib.error import URLError
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
-from app.config.bodies import CELESTIAL_BODIES
-from app.data.horizons_cache import load_payload
+from app.config.bodies import CELESTIAL_BODIES, HORIZONS_API_URL, HORIZONS_TIMEOUT_S
 from app.models.domain import CelestialBody, Vec3
 
 
@@ -22,7 +24,7 @@ class EphemerisError(RuntimeError):
 
 @lru_cache(maxsize=16)
 def get_body_state_table(body: CelestialBody, start: datetime, stop: datetime,
-                         intervals: int, center: str = "500@3") -> tuple:
+                         intervals: int) -> tuple:
     """Tabla uniforme (segundos, posiciones SI, velocidades SI), una petición.
 
     STEP_SIZE sin unidades indica el número de intervalos entre ambos extremos.
@@ -35,7 +37,7 @@ def get_body_state_table(body: CelestialBody, start: datetime, stop: datetime,
     params = {
         "format": "json", "COMMAND": config.horizons_id,
         "OBJ_DATA": "NO", "MAKE_EPHEM": "YES", "EPHEM_TYPE": "VECTORS",
-        "CENTER": center, "REF_SYSTEM": "ICRF", "REF_PLANE": "FRAME",
+        "CENTER": "500@3", "REF_SYSTEM": "ICRF", "REF_PLANE": "FRAME",
         "TIME_TYPE": "UT", "OUT_UNITS": "KM-S", "VEC_TABLE": "2",
         "VEC_CORR": "NONE", "CSV_FORMAT": "YES",
         "START_TIME": "'JD%.10f'" % (start.timestamp() / 86400 + 2440587.5),
@@ -43,7 +45,9 @@ def get_body_state_table(body: CelestialBody, start: datetime, stop: datetime,
         "STEP_SIZE": str(intervals),
     }
     try:
-        payload = load_payload(params)
+        with urlopen(f"{HORIZONS_API_URL}?{urlencode(params)}",
+                     timeout=HORIZONS_TIMEOUT_S) as response:
+            payload = json.load(response)
         if payload.get("error"):
             raise ValueError(payload["error"])
         table = payload["result"].split("$$SOE", 1)[1].split("$$EOE", 1)[0].strip()
@@ -90,18 +94,21 @@ def _get_body_state(body: CelestialBody, time: datetime) -> tuple[Vec3, Vec3]:
 
 
 @lru_cache(maxsize=2048)
-def _fetch_state(horizons_id: str, instant: datetime, center: str = "500@3") -> tuple[Vec3, Vec3]:
+def _fetch_state(horizons_id: str, instant: datetime) -> tuple[Vec3, Vec3]:
     julian_day = instant.timestamp() / 86400.0 + 2440587.5
     params = {
         "format": "json", "COMMAND": horizons_id,
         "OBJ_DATA": "NO", "MAKE_EPHEM": "YES", "EPHEM_TYPE": "VECTORS",
-        "CENTER": center, "REF_SYSTEM": "ICRF", "REF_PLANE": "FRAME",
+        "CENTER": "500@3", "REF_SYSTEM": "ICRF", "REF_PLANE": "FRAME",
         "TIME_TYPE": "UT", "TLIST": f"{julian_day:.10f}", "TLIST_TYPE": "JD",
         "OUT_UNITS": "KM-S", "VEC_TABLE": "2", "VEC_CORR": "NONE",
         "CSV_FORMAT": "YES",
     }
     try:
-        payload = load_payload(params)
+        with urlopen(
+            f"{HORIZONS_API_URL}?{urlencode(params)}", timeout=HORIZONS_TIMEOUT_S
+        ) as response:
+            payload = json.load(response)
     except (URLError, TimeoutError, OSError, ValueError) as error:
         raise EphemerisError(f"Error consultando Horizons: {error}") from error
     if not isinstance(payload, dict):
@@ -123,3 +130,14 @@ def _parse_state(result: str) -> tuple[Vec3, Vec3]:
         return (values[0], values[1], values[2]), (values[3], values[4], values[5])
     except (AttributeError, IndexError, TypeError, ValueError) as error:
         raise EphemerisError("No se pudo interpretar la posición de Horizons.") from error
+
+
+def get_sun_time_pos(time: datetime) -> Vec3:
+    """Posición del centro del Sol (ID 10) respecto al baricentro Tierra-Luna, ICRF, en metros.
+
+    Utiliza la misma configuración y caché Horizons que las posiciones terrestres.
+    No forma parte del catálogo dinámico de dos cuerpos ni altera la propagación.
+    """
+    if not isinstance(time, datetime) or time.utcoffset() is None:
+        raise ValueError("Se requiere una fecha solar con zona horaria.")
+    return _fetch_state("10", time.astimezone(timezone.utc))[0]

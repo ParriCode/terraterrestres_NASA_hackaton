@@ -28,9 +28,9 @@ def propagate_planar(
         if not math.isfinite(mu) or mu <= 0.0 or not math.isfinite(radius) or radius <= 0.0:
             raise GravityError(f"Invalid gravitational body: {body.id}")
         if events:
-            contact_radius = radius - (1.0 if body.id == getattr(scenario, "origin_id", "earth") else 0.0)
+            contact_radius = radius - (1.0 if body.id == "earth" else 0.0)
         else:
-            contact_radius = (radius - 1.0) if body.id == getattr(scenario, "origin_id", "earth") else (0.5 * radius)
+            contact_radius = (radius - 1.0) if body.id == "earth" else (0.5 * radius)
         motion = getattr(body, "_motion", None)
         pos_fast = motion.pos_xy if motion is not None else getattr(body, "pos_xy_fast", None)
         fast_bodies.append((body, body.id, mu, contact_radius, pos_fast))
@@ -59,7 +59,7 @@ def propagate_planar(
         return float(state[2]), float(state[3]), ax, ay
 
     if stop_at_earth_radius_m is not None:
-        earth = next((body for body in bodies if body.id == getattr(scenario, "origin_id", "earth")), None)
+        earth = next((body for body in bodies if body.id == "earth"), None)
         if earth is None or not math.isfinite(stop_at_earth_radius_m) or stop_at_earth_radius_m <= earth.radius_m:
             raise ValueError("La interfaz terrestre debe ser mayor que el radio físico de la Tierra.")
         ex, ey = earth.pos(t0)[:2]
@@ -77,7 +77,7 @@ def propagate_planar(
         event_functions.append(contact)
 
     if stop_at_earth_radius_m is not None:
-        earth = next(body for body in bodies if body.id == getattr(scenario, "origin_id", "earth"))
+        earth = next(body for body in bodies if body.id == "earth")
         motion = getattr(earth, "_motion", None)
         earth_pos = motion.pos_xy if motion is not None else getattr(earth, "pos_xy_fast", None)
 
@@ -98,7 +98,7 @@ def propagate_planar(
         atol=atol,
         dense_output=dense_output,
         events=event_functions or None,
-        max_step=min(86400.0 if hasattr(scenario, "origin_id") else 3600.0, (t1 - t0) / 100.0),
+        max_step=min(3600.0, (t1 - t0) / 100.0),
     )
     if not solution.success:
         raise RuntimeError(f"Falló la propagación: {solution.message}")
