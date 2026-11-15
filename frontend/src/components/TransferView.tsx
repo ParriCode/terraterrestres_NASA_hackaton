@@ -3,11 +3,11 @@ import type { PointerEvent, WheelEvent } from 'react'
 import type { TransferResponse, TransferSample, TransferState } from '../types/transfer'
 import { clamp, stateAt } from '../utils/transfer'
 import Icon from './Icon'
-import { getEarthMoonEphemeris } from '../api/ephemerides'
-import type { EarthMoonEphemeris } from '../api/ephemerides'
+import { getEarthMoonEphemeris, getSunDirection } from '../api/ephemerides'
+import type { EarthMoonEphemeris, SunDirectionEphemeris } from '../api/ephemerides'
 import { projectIcrfKm } from '../utils/icrfProjection'
 
-type Props = { date: Date; transfer: TransferResponse | null; state: TransferState | null; time: number; visible?: boolean; color?: string; onSolar: () => void }
+type Props = { date: Date; transfer: TransferResponse | null; state: TransferState | null; time: number; visible?: boolean; color?: string }
 type Box = { x: number; y: number; w: number; h: number }
 type Point = { x: number; y: number }
 const W = 1000, H = 640
@@ -34,7 +34,7 @@ function makePath(samples: TransferSample[], basis: number[][]): string {
   return d
 }
 
-export default function TransferView({ date, transfer, state, time, visible = true, color = '#70efd8', onSolar }: Props) {
+export default function TransferView({ date, transfer, state, time, visible = true, color = '#70efd8' }: Props) {
   const svg = useRef<SVGSVGElement>(null)
   const drag = useRef<{ x: number; y: number; box: Box } | null>(null)
   const dateIso = date.toISOString()
@@ -45,6 +45,32 @@ export default function TransferView({ date, transfer, state, time, visible = tr
   } | null>(null)
   const preview = previewResult?.date === dateIso ? previewResult.data : null
   const previewError = previewResult?.date === dateIso ? previewResult.error : ''
+  // Dirección Tierra → Sol en ICRF, proyectada con los mismos ejes XY del visor.
+  // Se actualiza una vez al día (12:00 UTC), no en cada fotograma de reproducción.
+  // Si Horizons falla, NO se inventa una orientación solar.
+  const sunDateKey = `${dateIso.slice(0, 10)}T12:00:00.000Z`
+  const [sunResult, setSunResult] = useState<{
+    key: string; data: SunDirectionEphemeris | null; error: string
+  } | null>(null)
+  const sun = sunResult?.key === sunDateKey ? sunResult.data : null
+  const sunError = sunResult?.key === sunDateKey ? sunResult.error : ''
+  useEffect(() => {
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      getSunDirection(new Date(sunDateKey), controller.signal)
+        .then(data => setSunResult({ key: sunDateKey, data, error: '' }))
+        .catch(error => {
+          if (!controller.signal.aborted) setSunResult({
+            key: sunDateKey, data: null,
+            error: error instanceof Error ? error.message : 'Sin datos solares',
+          })
+        })
+    }, 450)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [sunDateKey])
+  const solarXY = sun ? { x: sun.direction_icrf[0], y: -sun.direction_icrf[1] } : null
+  const solarAngleDeg = solarXY && Math.hypot(solarXY.x, solarXY.y) > 1e-6
+    ? Math.atan2(solarXY.y, solarXY.x) * 180 / Math.PI : null
   useEffect(() => {
     if (transfer) return
     const controller = new AbortController()
@@ -155,7 +181,7 @@ export default function TransferView({ date, transfer, state, time, visible = tr
       onPointerDown={pointerDown} onPointerMove={pointerMove}
       onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}
       onLostPointerCapture={() => { drag.current = null }} onDragStart={e => e.preventDefault()}
-      role="img" aria-label={transfer ? 'Trayectoria de la nave en proyección ICRF del sistema Tierra–Luna' : 'Vista ilustrativa de Tierra y Luna'}>
+      role="img" aria-label={transfer ? 'Trayectoria de la nave en proyección ICRF del sistema Tierra–Luna' : 'Posiciones Tierra y Luna consultadas a NASA/JPL cuando están disponibles'}>
       <defs><marker id="arrow-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
         <path d="M0,0 L10,5 L0,10 z" fill="#ffbd69" /></marker></defs>
 
@@ -200,10 +226,19 @@ export default function TransferView({ date, transfer, state, time, visible = tr
           width={shipIconSize} height={shipIconSize} pointerEvents="none" />}
       </>}
     </svg>
-    <div className="scene-heading scene-heading-local"><span className="eyebrow">SISTEMA TIERRA–LUNA</span><h1>{transfer?.mission_mode === 'lunar_orbit_return' ? 'Órbita lunar y regreso' : transfer?.mission_mode === 'free_return' ? 'Sobrevuelo y retorno libre' : transfer ? 'Trayectoria calculada' : preview ? 'Posición lunar según JPL' : previewError ? 'Efemérides no disponibles' : 'Consultando NASA/JPL…'}</h1>
+    <div className="scene-heading scene-heading-local"><span className="eyebrow">SISTEMA TIERRA–LUNA</span><h1>{transfer?.mission_mode === 'lunar_orbit_return' ? 'Apolo 11 · Órbita lunar y regreso' : transfer?.mission_mode === 'free_return' ? 'Apolo 8/13 · Retorno libre' : transfer ? 'Trayectoria calculada' : preview ? 'Posición lunar según JPL' : previewError ? 'Efemérides no disponibles' : 'Consultando NASA/JPL…'}</h1>
       <p>{transfer ? 'La nave sigue las muestras calculadas por el backend.' : previewError || (preview ? `Fecha UTC: ${new Date(preview.date).toLocaleString('es-ES', { timeZone: 'UTC' })}` : 'Descargando las posiciones reales para la fecha seleccionada.')}</p></div>
+    <div className="sun-indicator"
+      title={sun ? `Dirección Tierra → Sol calculada con JPL Horizons (${sun.date}). Proyección XY; el Sol está fuera de escala.` : sunError || 'Consultando la dirección solar en JPL Horizons'}>
+      <img src="/resource/sol.svg" alt="" draggable={false} />
+      <span>Sol</span>
+      {solarAngleDeg !== null
+        ? <span className="sun-indicator__arrow" style={{ transform: `rotate(${solarAngleDeg}deg)` }}>
+            <Icon name="arrow" size={17} />
+          </span>
+        : <span className="sun-indicator__unavailable" aria-label="Dirección solar no disponible">{sunError ? 'Sin datos' : '…'}</span>}
+    </div>
     <div className="map-tools">
-      <button className="icon-button" onClick={onSolar} aria-label="Volver al sistema solar" title="Volver al sistema solar"><Icon name="back" /></button>
       <button className="icon-button" onClick={() => zoom(.67)} aria-label="Acercar" title="Acercar"><Icon name="plus" /></button>
       <button className="icon-button" onClick={() => zoom(1.5)} aria-label="Alejar" title="Alejar"><Icon name="minus" /></button>
       <button className="icon-button" onClick={() => setBox(geometry.home)} aria-label="Encuadrar" title="Encuadrar"><Icon name="crosshair" /></button>

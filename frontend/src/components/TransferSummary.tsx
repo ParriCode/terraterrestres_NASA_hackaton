@@ -10,7 +10,7 @@ export default function TransferSummary({ transfer, state }: Props) {
   const v0 = transfer.initial_velocity_m_s
   return <aside className="results-panel">
     <h2><Icon name="layers" size={16} />Resultado</h2>
-    <p className="result-caption">{transfer.mission_mode === 'lunar_orbit_return' ? 'Órbita lunar y regreso · ' : transfer.mission_mode === 'free_return' ? 'Retorno libre · ' : ''}{transfer.li_mission || transfer.li_one_way_delta_v_m_s != null ? 'Optimización de Li (Δv)' : transfer.objective === 'energia' ? 'Mínima energía' : 'Mínima distancia'} · {transfer.source}</p>
+    <p className="result-caption">{transfer.mission_mode === 'lunar_orbit_return' ? 'Apolo 11 · ' : transfer.mission_mode === 'free_return' ? 'Apolo 8/13 · ' : ''}{transfer.li_mission || transfer.li_one_way_delta_v_m_s != null ? 'Optimización de Li (Δv)' : transfer.objective === 'energia' ? 'Mínima energía' : 'Mínima distancia'} · {transfer.source}</p>
     <div className="result-grid">
       <div><span>Velocidad inicial (baricéntrica)</span><strong>{formatKmS(norm(v0))}</strong>
         <small>({kms(v0[0])}, {kms(v0[1])}) km/s</small></div>

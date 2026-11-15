@@ -64,11 +64,11 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
       <legend>Tipo de misión</legend>
       <div className="segmented mission-modes">
         <button type="button" aria-pressed={missionMode === 'lunar_transfer'} className={missionMode === 'lunar_transfer' ? 'active' : ''}
-          onClick={() => setMissionMode('lunar_transfer')}>Tierra → Luna</button>
+          onClick={() => setMissionMode('lunar_transfer')}>Transferencia directa</button>
         <button type="button" aria-pressed={missionMode === 'free_return'} className={missionMode === 'free_return' ? 'active' : ''}
-          onClick={() => { setMissionMode('free_return'); setObjective('energia') }}>Retorno libre</button>
+          onClick={() => { setMissionMode('free_return'); setObjective('energia') }}>Apolo 8/13</button>
         <button type="button" aria-pressed={missionMode === 'lunar_orbit_return'} className={missionMode === 'lunar_orbit_return' ? 'active' : ''}
-          onClick={() => { setMissionMode('lunar_orbit_return'); setObjective('energia') }}>Órbita y regreso</button>
+          onClick={() => { setMissionMode('lunar_orbit_return'); setObjective('energia') }}>Apolo 11</button>
       </div>
     </fieldset>
     <label>Fecha de salida (UTC)
@@ -110,9 +110,9 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
       </div>
     </fieldset>
     <p className="form-note">{missionMode === 'lunar_orbit_return'
-      ? 'Motor 3D de Li: inserción lunar, órbitas comprobadas y regreso a 120 km de altitud. Se buscan rutas viables y menor Δv entre las encontradas; no se simula aterrizaje.'
+      ? 'Perfil Apolo 11: inserción en órbita lunar, estancia y regreso. Inspirado en esa misión, sin alunizaje ni aterrizaje simulado.'
       : missionMode === 'free_return'
-        ? 'Motor 3D de Li: sobrevuelo y vuelta a la Tierra sin encendido posterior de retorno. No se simula aterrizaje.'
+        ? 'Perfil Apolo 8/13: retorno libre alrededor de la Luna, inspirado especialmente en la trayectoria de emergencia del Apolo 13. No es una reconstrucción histórica exacta.'
         : 'El ángulo de llegada se busca automáticamente entre alternativas válidas. La duración es fija.'}</p>
     <details className="technical-details"><summary>Alcance de la búsqueda</summary>
       <p>{isReturn ? 'Motor de Li con efemérides NASA/JPL, Lambert, corrección de disparo y propagación SciPy solve_ivp (no RK2). Se exige llegada entrante al corredor terrestre a 120 km. Sin modelo atmosférico, sin aterrizaje ni combustible por defecto. El criterio distancia no está implementado por Li para retornos.' : 'Para Δv, Li busca duración y geometrías candidatas hasta el máximo solicitado. Para distancia, se mantiene el optimizador P2 con duración fija. Ninguno garantiza óptimo global.'}</p>

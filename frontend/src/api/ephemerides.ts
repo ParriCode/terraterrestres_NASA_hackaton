@@ -27,3 +27,28 @@ export async function getEarthMoonEphemeris(date: Date, signal: AbortSignal): Pr
   }
   return value as EarthMoonEphemeris
 }
+
+/** Dirección unitaria Tierra → Sol, obtenida de JPL Horizons. Nunca se sustituye por un mock. */
+export type SunDirectionEphemeris = {
+  source: 'NASA/JPL Horizons'
+  date: string
+  frame: 'earth_moon_barycentric_icrf'
+  from: 'earth'
+  toward: 'sun'
+  direction_icrf: Vec3
+}
+
+export async function getSunDirection(date: Date, signal: AbortSignal): Promise<SunDirectionEphemeris> {
+  const response = await fetch(`${API_BASE_URL}/ephemeris/sun-direction?date=${encodeURIComponent(date.toISOString())}`, { signal })
+  if (!response.ok) throw new Error(`No se pudo consultar la dirección solar JPL (HTTP ${response.status}).`)
+  const value: unknown = await response.json()
+  if (!value || typeof value !== 'object') throw new Error('Respuesta solar vacía.')
+  const data = value as Partial<SunDirectionEphemeris>
+  if (data.source !== 'NASA/JPL Horizons' || data.frame !== 'earth_moon_barycentric_icrf'
+    || data.from !== 'earth' || data.toward !== 'sun' || !validVec(data.direction_icrf)) {
+    throw new Error('Dirección solar incompatible con el visor.')
+  }
+  const norm = Math.hypot(...data.direction_icrf)
+  if (!(norm > 0.999 && norm < 1.001)) throw new Error('La dirección solar no está normalizada.')
+  return data as SunDirectionEphemeris
+}

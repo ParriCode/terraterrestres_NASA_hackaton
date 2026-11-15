@@ -130,3 +130,14 @@ def _parse_state(result: str) -> tuple[Vec3, Vec3]:
         return (values[0], values[1], values[2]), (values[3], values[4], values[5])
     except (AttributeError, IndexError, TypeError, ValueError) as error:
         raise EphemerisError("No se pudo interpretar la posición de Horizons.") from error
+
+
+def get_sun_time_pos(time: datetime) -> Vec3:
+    """Posición del centro del Sol (ID 10) respecto al baricentro Tierra-Luna, ICRF, en metros.
+
+    Utiliza la misma configuración y caché Horizons que las posiciones terrestres.
+    No forma parte del catálogo dinámico de dos cuerpos ni altera la propagación.
+    """
+    if not isinstance(time, datetime) or time.utcoffset() is None:
+        raise ValueError("Se requiere una fecha solar con zona horaria.")
+    return _fetch_state("10", time.astimezone(timezone.utc))[0]

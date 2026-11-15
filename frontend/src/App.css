@@ -1057,3 +1057,33 @@
 /* Tres estrategias sin romper los controles de objetivos de dos columnas. */
 .segmented.mission-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .segmented.mission-modes button { white-space: normal; min-height: 42px; }
+
+/* Indicador solar contextual. Fuera de escala, no añade un tercer cuerpo visible. */
+.sun-indicator {
+  position: absolute;
+  top: 18px;
+  left: 20px;
+  z-index: 12;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 13px;
+  border: 1px solid rgba(249, 183, 61, .54);
+  border-radius: 999px;
+  background: rgba(8, 17, 33, .91);
+  color: #ffdb83;
+  box-shadow: 0 4px 21px rgba(0, 0, 0, .24);
+  font-size: 13px;
+  font-weight: 750;
+  pointer-events: auto;
+  user-select: none;
+}
+.sun-indicator img { width: 24px; height: 24px; object-fit: contain; pointer-events: none; }
+.sun-indicator__arrow { display: inline-flex; align-items: center; justify-content: center; transform-origin: center; transition: transform 300ms ease; }
+.sun-indicator__unavailable { font-size: 11px; color: #d7ba86; font-weight: 500; }
+@media(max-width:730px) {
+  .sun-indicator { top: 13px; left: 12px; }
+  .scene-heading-local { top: 77px; }
+  .map-tools { top: 125px; }
+}
