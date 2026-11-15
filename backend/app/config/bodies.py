@@ -34,12 +34,4 @@ CELESTIAL_BODIES = (
         mass_pattern=r"Mass,\s*x10\^22\s*kg\s*=\s*([0-9.]+)",
         mass_scale_kg=1e22,
     ),
-    HorizonsBodyConfig(
-        id="sun",
-        name="Sun",
-        horizons_id="10",
-        radius_pattern=r"Vol\.\s*mean\s+radius\s*\(km\)\s*=\s*([0-9.]+)",
-        mass_pattern=r"Mass,\s*10\^24\s*kg\s*=\s*~?([0-9.]+)",
-        mass_scale_kg=1e24,
-    ),
 )

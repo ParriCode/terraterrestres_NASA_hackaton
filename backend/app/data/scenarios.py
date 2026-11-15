@@ -220,8 +220,7 @@ class ScenarioBody:
 
     def _instant(self, time_s: float) -> datetime:
         validate_non_negative(time_s, "time_s")
-        if time_s > self.duration_s:
-            raise ValueError(f"Tiempo {time_s} s fuera de la tabla ({self.duration_s} s).")
+        return self.date + timedelta(seconds=time_s)
 
     @staticmethod
     def _uses_default_ephemeris() -> bool:
@@ -312,8 +311,6 @@ class Scenario:
     def get_bodies(self) -> list[ScenarioBody]:
         return list(self.bodies.values())
 
-    def get_body_pos(self, body: ScenarioBody, t_s: float) -> Vec3:
-        return body.pos(t_s)
 
 class PlanarScenarioBody(ScenarioBody):
     """Movimiento 2D interpolado en O(1); conserva la interfaz usada por la física."""
@@ -348,7 +345,7 @@ class PlanarScenarioBody(ScenarioBody):
 
 
 class PlanarScenario:
-    """Modelo planar Tierra-Luna-nave; perturbación solar reservada al solver 3D."""
+    """Horizons proyectado en el plano orbital inicial, con ejes fijos.
 
     Origen: baricentro Tierra–Luna. X: Tierra→Luna inicial. Y: sentido del
     movimiento lunar inicial. Se omite la componente perpendicular al plano.

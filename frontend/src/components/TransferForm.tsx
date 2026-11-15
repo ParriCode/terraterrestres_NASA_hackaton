@@ -22,16 +22,6 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
   const [error, setError] = useState('')
   const isReturn = missionMode !== 'lunar_transfer'
 
-  const maxAllowedDays = profile === 'one_way' ? 30 : 35
-
-  function handleProfileChange(next: MissionProfile) {
-    setProfile(next)
-    setError('')
-    if (next === 'one_way' && maxDays > 30) setMaxDays(10)
-    if (next === 'free_return' && maxDays < 10) setMaxDays(12)
-    if (next === 'lunar_orbit' && maxDays < 12) setMaxDays(14)
-  }
-
   function submit(event: FormEvent) {
     event.preventDefault()
     if (!date) return setError('Introduce una fecha de salida UTC válida.')

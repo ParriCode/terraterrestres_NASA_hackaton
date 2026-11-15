@@ -76,12 +76,7 @@ class TransferResult:
     arrival_error_m: float
     mass_kg: float
     objective: str
-    launch_delta_v_m_s: float
-    arrival_v_infinity_m_s: float
-    arrival_delta_v_m_s: float
-    total_delta_v_m_s: float
-    parking_alt_m: float = 0.0
-    _solution: object = field(repr=False, default=None)
+    _solution: object = field(repr=False)
 
     def state(self, time_s: float) -> SpacecraftState:
         """Estado interpolado sin reintegrar, dentro del intervalo del vuelo."""
@@ -388,45 +383,14 @@ def F(
 ) -> TransferResult:
     """Busca la mejor candidata válida entre semillas Lambert pro/retrógradas.
 
-
-def prograde_circular_velocity(mu_m3_s2: float, rel_pos_m: np.ndarray) -> np.ndarray:
-    """Velocidad circular tangencial prograde (sentido antihorario en XY)."""
-    r_mag = float(np.linalg.norm(rel_pos_m))
-    u_r = rel_pos_m / r_mag
-    u_t = np.array((-u_r[1], u_r[0], 0.0))
-    v_circ = float(np.sqrt(mu_m3_s2 / r_mag))
-    return v_circ * u_t
-
-
-def _earth_positions_xy(earth, times: np.ndarray) -> np.ndarray:
-    """Evalúa la posición XY de la Tierra vectorizada sobre todo el array de tiempos."""
-    motion = getattr(earth, "_motion", None)
-    if callable(motion):
-        return np.asarray(motion(times))[:, :2]
-    return np.array([earth.pos(float(t))[:2] for t in times])
-
-
-def F(
-    x0: Vec3,
-    x1: Vec3,
-    t0: float,
-    t1: float,
-    objetivo="energia",
-    *,
-    scenario: PlanarScenario,
-    mass_kg=1.0,
-    arrival_tolerance_m=1000.0,
-    parking_alt_m: float = 0.0,
-    prograde_hint: bool | None = None,
-    warm_start_velocity: Vec3 | None = None,
-) -> TransferResult:
-    """Busca la mejor candidata válida entre semillas Lambert o arranque en caliente."""
+    Replica F del documento, sin garantía de óptimo global. La energía de
+    lanzamiento se mide respecto al centro terrestre. La longitud se mide
+    respecto a la Tierra en ejes fijos. Los extremos están en las superficies.
+    """
     validate_vec3(x0, "x0")
     validate_vec3(x1, "x1")
     validate_positive(mass_kg, "mass_kg")
     validate_positive(arrival_tolerance_m, "arrival_tolerance_m")
-    if not np.isfinite(parking_alt_m) or parking_alt_m < 0:
-        raise ValueError("parking_alt_m debe ser finito y no negativo.")
     if not 0 <= t0 < t1 <= scenario.duration_s:
         raise ValueError("Se requiere 0 <= t0 < t1 <= duración del escenario.")
     if x0[2] != 0 or x1[2] != 0:
@@ -584,39 +548,8 @@ def F(
                     reasons.append(str(error))
 
     if not valid:
-        prograde_seq = (prograde_hint,) if prograde_hint is not None else (True, False)
-        factor_groups = ((1.0,),) if prograde_hint is not None else ((1.0,), (0.98, 1.02))
-        rel_r1 = tuple(start - earth.pos(t0))
-        rel_r2 = tuple(target - earth.pos(t1))
-        for factors in factor_groups:
-            if valid:
-                break
-            for prograde in prograde_seq:
-                for factor in factors:
-                    try:
-                        seed = solve_lambert(
-                            rel_r1,
-                            rel_r2,
-                            (t1 - t0) * factor,
-                            earth.mu_m3_s2,
-                            prograde=prograde,
-                        )
-                        guess = tuple(np.asarray(seed.departure_velocity_m_s) + earth_velocity)
-                        _validate_guess(guess, max_evals=55)
-                    except (LambertError, RuntimeError, ArithmeticError, ValueError) as error:
-                        reasons.append(str(error))
-
-    if not valid:
-        raise TransferNotFoundError(
-            "No se encontró transferencia válida: " + "; ".join(sorted(set(reasons)))
-        )
-    if objetivo == "energia":
-        key = lambda r: r.launch_energy_j
-    elif objetivo == "distancia":
-        key = lambda r: r.path_length_m
-    else:
-        key = lambda r: r.total_delta_v_m_s
-    return min(valid, key=key)
+        raise TransferNotFoundError("No se encontró transferencia válida: " + "; ".join(sorted(set(reasons))))
+    return min(valid, key=lambda r: r.launch_energy_j if objetivo == "energia" else r.path_length_m)
 
 
 def design_transfer(
@@ -635,8 +568,6 @@ def design_transfer(
     """
     if not math.isfinite(launch_angle_deg) or not math.isfinite(arrival_angle_deg):
         raise ValueError("Los ángulos deben ser finitos.")
-    if not np.isfinite(parking_alt_m) or parking_alt_m < 0:
-        raise ValueError("parking_alt_m debe ser finito y no negativo.")
     scenario = PlanarScenario(date, duration_s, spacing_s=spacing_s)
     earth, moon = scenario.bodies["earth"], scenario.bodies["moon"]
 

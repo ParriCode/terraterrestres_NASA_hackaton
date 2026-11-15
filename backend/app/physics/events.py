@@ -1,4 +1,9 @@
-"""Geometría de colisiones para el escenario Tierra-Luna."""
+"""Geometría de colisiones para el MVP Tierra-Luna.
+
+La única clase de evento emitida en el contrato v1 es ``collision``.
+Una intersección de cuerdas es una *alarma* que fuerza a reducir el paso,
+no una prueba de que la trayectoria curva haya impactado.
+"""
 
 import math
 from collections.abc import Sequence
@@ -48,6 +53,7 @@ def find_colliding_body(
     return None
 
 
+# Alias de compatibilidad: código anterior del equipo importa este nombre.
 _find_colliding_body = find_colliding_body
 
 
@@ -84,7 +90,11 @@ def segment_min_distance_sq(
     body_start_m: Vec3,
     body_end_m: Vec3,
 ) -> float:
-    """Distancia mínima al cuadrado de la cuerda nave-cuerpo relativa."""
+    """Distancia mínima al cuadrado de la cuerda nave-cuerpo *relativa*.
+
+    Se aproximan linealmente ambos movimientos SOLO para identificar
+    posibles cruces que requieren integración con un paso más pequeño.
+    """
     start, end = _relative_chord(
         spacecraft_start_m, spacecraft_end_m, body_start_m, body_end_m
     )
@@ -102,36 +112,14 @@ def swept_collision_closest_fraction(
     body_start_m: Vec3,
     body_end_m: Vec3,
     body_radius_m: float,
-    midpoint_spacecraft_m: Vec3 | None = None,
-    midpoint_body_m: Vec3 | None = None,
 ) -> float | None:
-    """Fracción de máxima aproximación con corrección opcional por punto medio curvo.
+    """Fracción de máxima aproximación de la cuerda, si cruza la esfera.
 
     Compatibilidad con la implementación original de ORBITAL4B. NO equivale a
     la fracción de primer impacto ni certifica el evento orbital real.
     """
     if not math.isfinite(body_radius_m) or body_radius_m <= 0:
         raise ValueError("Invalid body radius")
-
-    if midpoint_spacecraft_m is not None and midpoint_body_m is not None:
-        first_half = swept_collision_closest_fraction(
-            spacecraft_start_m,
-            midpoint_spacecraft_m,
-            body_start_m,
-            midpoint_body_m,
-            body_radius_m,
-        )
-        if first_half is not None:
-            return 0.5 * first_half
-        second_half = swept_collision_closest_fraction(
-            midpoint_spacecraft_m,
-            spacecraft_end_m,
-            midpoint_body_m,
-            body_end_m,
-            body_radius_m,
-        )
-        return 0.5 + 0.5 * second_half if second_half is not None else None
-
     start, end = _relative_chord(
         spacecraft_start_m, spacecraft_end_m, body_start_m, body_end_m
     )

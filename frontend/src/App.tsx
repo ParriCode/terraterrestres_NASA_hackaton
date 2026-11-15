@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import { ApiError, requestOptimizedTransfer, requestRoundTripTransfer } from './api/transfers'
+import { ApiError, requestTransfer } from './api/transfers'
 import Icon from './components/Icon'
 import PlaybackControls from './components/PlaybackControls'
-import TradeoffChart from './components/TradeoffChart'
 import TransferForm from './components/TransferForm'
 import TransferSummary from './components/TransferSummary'
 import TransferView from './components/TransferView'
@@ -38,10 +37,11 @@ export default function App() {
     const tick = (now: number) => {
       const dt = (now - last) / 1000
       last = now
-      const next = Math.min(duration, timeRef.current + dt * speed)
-      timeRef.current = next
-      setTime(next)
-      if (next >= duration) { setPlaying(false); return }
+      setTime(t => {
+        const next = t + dt * speed
+        if (next >= duration) { setPlaying(false); return duration }
+        return next
+      })
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)

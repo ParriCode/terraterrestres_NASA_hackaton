@@ -46,8 +46,8 @@ def create_app(
         title="ORBITAL4B — API de simulación",
         version="0.1.0",
         description=(
-            f"Modo de simulación v1: {mode}. Las rutas /transfers usan efemérides "
-            "NASA/JPL Horizons y los optimizadores numéricos reales."
+            f"Modo actual: {mode}. En modo mock se devuelven DATOS FICTICIOS para React. "
+            "El motor orbital real se conectará mediante adaptadores."
         ),
     )
     app.state.simulation_mode = mode

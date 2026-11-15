@@ -1,8 +1,9 @@
 import type { TransferRequest, TransferResponse, Vec3 } from '../types/transfer'
 import { requestOptimizedOutbound, requestRoundTripMission } from './missions'
 
+/** Configurable en frontend/.env.local: VITE_API_BASE_URL=http://localhost:8000 */
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
-const TIMEOUT_MS = 5 * 60_000
+const TIMEOUT_MS = 5 * 60_000 // el cálculo es síncrono y puede probar varias semillas
 
 export class ApiError extends Error {
   readonly status: number
@@ -15,9 +16,9 @@ export class ApiError extends Error {
 
 type ValidationItem = { loc?: unknown[]; msg?: string }
 
+/** FastAPI devuelve detail como texto (HTTPException) u objeto (validación). */
 function describeDetail(detail: unknown): string {
   if (typeof detail === 'string') return detail
-  if (Array.isArray(detail)) return detail.map(e => (e as ValidationItem).msg).join(' · ')
   if (detail && typeof detail === 'object') {
     const d = detail as { message?: string; suggestion?: string; errors?: ValidationItem[] }
     const items = Array.isArray(d.errors)
@@ -25,54 +26,12 @@ function describeDetail(detail: unknown): string {
       : []
     return [d.message, d.suggestion, ...items].filter(Boolean).join(' · ') || JSON.stringify(detail)
   }
+  if (Array.isArray(detail)) return detail.map(e => (e as ValidationItem).msg).join(' · ')
   return ''
 }
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 const isVec3 = (v: unknown): v is Vec3 => Array.isArray(v) && v.length === 3 && v.every(isNum)
-
-function isValidFrame(frame: unknown): boolean {
-  return (
-    frame === 'earth_moon_barycentric_initial_orbital_plane' ||
-    frame === 'earth_moon_barycentric_orbital_3d'
-  )
-}
-
-function isValidSamples(s: unknown): s is TransferSample[] {
-  return (
-    Array.isArray(s) &&
-    s.length >= 2 &&
-    s[0] != null &&
-    s[0].t_s === 0 &&
-    s.every(
-      (p, i) =>
-        p != null &&
-        isNum(p.t_s) &&
-        (i === 0 || p.t_s > s[i - 1].t_s) &&
-        isVec3(p.position_m) &&
-        isVec3(p.velocity_m_s) &&
-        isVec3(p.body_positions_m?.earth) &&
-        isVec3(p.body_positions_m?.moon) &&
-        (p.body_positions_m?.sun === undefined || isVec3(p.body_positions_m.sun)),
-    )
-  )
-}
-
-function isTradeoffList(value: unknown): value is TradeoffPoint[] {
-  return (
-    Array.isArray(value) &&
-    value.every(p => {
-      if (!p || typeof p !== 'object') return false
-      const pt = p as Partial<TradeoffPoint>
-      return (
-        isNum(pt.duration_s) &&
-        isNum(pt.estimated_launch_delta_v_m_s) &&
-        isNum(pt.estimated_arrival_delta_v_m_s) &&
-        isNum(pt.estimated_total_delta_v_m_s)
-      )
-    })
-  )
-}
 
 function isTransferResponse(value: unknown): value is TransferResponse {
   if (!value || typeof value !== 'object') return false
@@ -119,10 +78,7 @@ export async function requestTransfer(body: TransferRequest, signal?: AbortSigna
   } catch (error) {
     if (signal?.aborted) throw error
     if (timeout.aborted) throw new ApiError(0, `El cálculo superó ${TIMEOUT_MS / 60_000} min sin respuesta.`)
-    throw new ApiError(
-      0,
-      `No se pudo conectar con ${url}. Comprueba que el backend está arrancado y que CORS (ORBITAL_CORS_ORIGINS) admite ${window.location.origin}.`,
-    )
+    throw new ApiError(0, `No se pudo conectar con ${url}. Comprueba que el backend está arrancado y que CORS (ORBITAL_CORS_ORIGINS) admite ${window.location.origin}.`)
   }
   const data: unknown = await response.json().catch(() => null)
   if (!response.ok) {
@@ -144,34 +100,4 @@ export async function requestTransfer(body: TransferRequest, signal?: AbortSigna
     throw new ApiError(0, 'El backend no ha confirmado una órbita lunar y retorno validados.')
   }
   return data
-}
-
-export async function requestTransfer(body: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
-  const data = await postJson('/transfers', body, signal)
-  if (!isTransferResponse(data)) {
-    throw new ApiError(0, 'El backend respondió con un formato distinto al esperado para /transfers.')
-  }
-  return data
-}
-
-export async function requestOptimizedTransfer(
-  body: OptimizeTransferRequest,
-  signal?: AbortSignal,
-): Promise<OptimizeTransferResponse> {
-  const data = await postJson('/transfers/optimize', body, signal)
-  if (isOptimizeOkResponse(data)) return { ...data, kind: 'one_way' }
-  if (isOptimizeNoFeasibleResponse(data)) return { ...data, kind: 'one_way' }
-  throw new ApiError(0, 'El backend respondió con un formato distinto al esperado para /transfers/optimize.')
-}
-
-export async function requestRoundTripTransfer(
-  body: RoundTripRequest,
-  signal?: AbortSignal,
-): Promise<RoundTripResponse> {
-  const data = await postJson('/transfers/round-trip', body, signal)
-  if (isRoundTripOkResponse(data)) return { ...data, kind: 'round_trip' }
-  if (isRoundTripNoFeasibleResponse(data)) {
-    return { ...data, kind: 'round_trip' }
-  }
-  throw new ApiError(0, 'El backend respondió con un formato distinto al esperado para /transfers/round-trip.')
 }
