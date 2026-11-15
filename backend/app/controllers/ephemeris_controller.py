@@ -2,7 +2,7 @@
 
 from datetime import timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import AwareDatetime
 
 from app.data.bodies import load_bodies
@@ -34,3 +34,55 @@ def earth_moon_at(date: AwareDatetime):
         "units": "m",
         "body_positions_m": positions,
     }
+
+
+@router.get('/solar')
+def solar_at(date: AwareDatetime):
+    from pathlib import Path
+    import math
+    from app.data.ephemeris import _fetch_state
+    catalog = load_bodies(Path(__file__).parents[1] / 'data' / 'solar_bodies.json')
+    from app.config.bodies import CELESTIAL_BODIES
+    ids = {b.id: b.horizons_id for b in CELESTIAL_BODIES}
+    eps = math.radians(23.439291111)
+    try:
+        positions = {}
+        for key in catalog:
+            x, y, z = _fetch_state(ids[key], date.astimezone(timezone.utc), center='500@0')[0]
+            positions[key] = [x, y * math.cos(eps) + z * math.sin(eps), 0.0]
+    except EphemerisError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    return {'source': 'NASA/JPL Horizons', 'date': date, 'center': '500@0',
+            'frame': 'ssb_ecliptic_j2000_projected', 'units': 'm', 'body_positions_m': positions}
+
+
+@router.get('/solar-day')
+async def solar_day(date: AwareDatetime, request: Request):
+    """Stream daily NASA tables; browsers interpolate without requesting each frame."""
+    from datetime import timedelta
+    import json
+    from pathlib import Path
+    from fastapi.responses import StreamingResponse
+    from starlette.concurrency import run_in_threadpool
+    from app.data.ephemeris import get_body_state_table
+
+    start = date.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    catalog = load_bodies(Path(__file__).parents[1] / 'data' / 'solar_bodies.json')
+
+    async def rows():
+        # Sun first anchors the map; Earth and Moon appear next.
+        for key in ('sun', 'earth', 'moon', 'mercury', 'venus', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune'):
+            if await request.is_disconnected():
+                return
+            try:
+                times, positions, velocities = await run_in_threadpool(
+                    get_body_state_table, catalog[key], start, start + timedelta(days=1), 24, center='500@0')
+                yield json.dumps({'body_id': key, 'date': start.isoformat(), 'source': 'NASA/JPL Horizons',
+                    'frame': 'ssb_icrf', 'times_s': times, 'positions_m': positions,
+                    'velocities_m_s': velocities}) + '\n'
+            except (EphemerisError, OSError) as exc:
+                yield json.dumps({'error': str(exc)}) + '\n'
+                return
+
+    return StreamingResponse(rows(), media_type='application/x-ndjson',
+        headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})

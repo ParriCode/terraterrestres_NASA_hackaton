@@ -35,3 +35,9 @@ CELESTIAL_BODIES = (
         mass_scale_kg=1e22,
     ),
 )
+
+# Additional major bodies; physical parameters are stored in solar_bodies.json.
+CELESTIAL_BODIES += tuple(
+    HorizonsBodyConfig(key, name, code, "", "", 1.0)
+    for key, name, code in [('sun', 'Sol', '10'), ('mercury', 'Mercurio', '199'), ('venus', 'Venus', '299'), ('mars', 'Marte', '499'), ('jupiter', 'Júpiter', '599'), ('saturn', 'Saturno', '699'), ('uranus', 'Urano', '799'), ('neptune', 'Neptuno', '899')]
+)

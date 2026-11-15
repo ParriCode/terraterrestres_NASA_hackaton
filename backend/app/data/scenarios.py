@@ -393,3 +393,25 @@ class PlanarScenario:
 
     def get_bodies(self) -> list[ScenarioBody]:
         return list(self.bodies.values())
+
+class SolarPlanarScenario(PlanarScenario):
+    """Two selected gravitating bodies, SSB origin, fixed J2000 ecliptic plane."""
+    def __init__(self, date, duration_s, origin_id, destination_id, spacing_s=3600):
+        from pathlib import Path
+        catalog = load_bodies(Path(__file__).with_name("solar_bodies.json"))
+        if origin_id == destination_id or origin_id not in catalog or destination_id not in catalog:
+            raise ValueError("Elige dos cuerpos distintos del catálogo solar.")
+        validate_positive(duration_s, "duration_s")
+        self.date, self.duration_s = date, duration_s
+        self.origin_id, self.destination_id = origin_id, destination_id
+        eps = math.radians(23.439291111)
+        self.basis_icrf = np.array([[1., 0., 0.], [0., math.cos(eps), math.sin(eps)]])
+        self.bodies = {}
+        intervals = min(10000, max(2, math.ceil(duration_s / spacing_s)))
+        # Sequential requests respect the public JPL service's usage guidance.
+        for key in (origin_id, destination_id):
+            times, positions, velocities = ephemeris.get_body_state_table(
+                catalog[key], date, date + timedelta(seconds=duration_s), intervals, center="500@0")
+            self.bodies[key] = PlanarScenarioBody(catalog[key], date, times,
+                np.asarray(positions) @ self.basis_icrf.T,
+                np.asarray(velocities) @ self.basis_icrf.T)

@@ -185,3 +185,40 @@ def lunar_orbit_return(request: LunarOrbitReturnRequest):
         raise HTTPException(status_code=422, detail={
             "code": "invalid_lunar_mission", "message": str(error),
         }) from error
+
+
+BodyId = Literal['sun', 'mercury', 'venus', 'earth', 'moon', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune']
+
+
+class SolarTransferRequest(OptimizeTransferRequest):
+    origin_id: BodyId = 'earth'
+    destination_id: BodyId = 'mars'
+    duration_s: float = Field(default=200 * 86400, gt=0, le=36525 * 86400, allow_inf_nan=False)
+
+
+@router.post('/solar')
+def solar_transfer(request: SolarTransferRequest):
+    if request.origin_id == request.destination_id:
+        raise HTTPException(422, 'El origen y el destino deben ser distintos.')
+    try:
+        optimized = optimize_transfer(request.date, request.duration_s,
+            origin_id=request.origin_id, destination_id=request.destination_id, solar=True,
+            launch_angle_deg=request.launch_angle_deg, objective=request.objective, mass_kg=request.mass_kg)
+    except EphemerisError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    except TransferNotFoundError as exc:
+        raise HTTPException(422, detail={
+            "code": "no_valid_transfer", "message": str(exc),
+            "suggestion": "Prueba otra duración o fecha de salida. La búsqueda limitada no demuestra que el viaje sea imposible.",
+        }) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    payload = serialize_transfer(optimized.transfer, request, arrival_angle_deg=optimized.arrival_angle_deg)
+    payload.update(frame='ssb_ecliptic_j2000_projected', origin_id=request.origin_id,
+        destination_id=request.destination_id, gravity_body_ids=[request.origin_id, request.destination_id],
+        model_limitations=['Proyección 2D. Solo origen y destino ejercen gravedad sobre la nave.',
+                           'Sin atmósferas, propulsión ni captura orbital. Llegada al radio nominal del destino.'])
+    payload['optimization'] = dict(method='bounded_angle_search', attempted_angles_deg=optimized.attempted_angles_deg,
+        valid_candidates=optimized.valid_candidates, search_complete=optimized.search_complete,
+        timed_out_angles_deg=optimized.timed_out_angles_deg, global_optimum_guaranteed=False)
+    return payload
