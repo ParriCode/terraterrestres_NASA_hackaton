@@ -1,5 +1,5 @@
 import type { TransferRequest, TransferResponse, Vec3 } from '../types/transfer'
-import { requestOptimizedOutbound, requestRoundTripMission } from './missions'
+import { requestMarsTransfer, requestOptimizedOutbound, requestRoundTripMission } from './missions'
 
 /** Configurable en frontend/.env.local: VITE_API_BASE_URL=http://localhost:8000 */
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
@@ -57,6 +57,7 @@ function isTransferResponse(value: unknown): value is TransferResponse {
 }
 
 export async function requestTransfer(body: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
+  if (body.destination === 'mars') return requestMarsTransfer(body, signal)
   if (body.mission_mode === 'lunar_orbit_return' || body.mission_mode === 'free_return') {
     return requestRoundTripMission(body, signal)
   }

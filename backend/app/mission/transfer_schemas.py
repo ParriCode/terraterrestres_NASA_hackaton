@@ -125,3 +125,60 @@ class NoFeasibleRoundTripResponse(_Response):
 
 OptimizedResponse = OptimizedTransferOkResponse | NoFeasibleOneWayResponse
 RoundTripResponse = RoundTripOkResponse | NoFeasibleRoundTripResponse
+
+
+# --------------------------------------------------------------------------- Marte (solo ida)
+# Esquemas propios: los lunares no se tocan (sus cuerpos siguen limitados a earth/moon/sun).
+
+class MarsSampleResponse(_Response):
+    t_s: float = Field(ge=0)
+    position_m: Vec3
+    velocity_m_s: Vec3
+    body_positions_m: dict[Literal["earth", "moon", "sun", "mars"], Vec3]
+
+
+class MarsTransferOkResponse(_Response):
+    status: Literal["ok"]
+    destination: Literal["mars"]
+    source: str
+    date: AwareDatetime
+    frame: Frame
+    basis_icrf: list[list[float]]
+    objective: Literal["delta_v"]
+    mass_kg: float = Field(gt=0)
+    duration_s: float = Field(gt=0)
+    max_duration_s: float = Field(gt=0)
+    min_search_duration_s: float = Field(gt=0)
+    parking_alt_m: float = Field(ge=0)
+    mars_periapsis_alt_m: float = Field(gt=0)
+    initial_velocity_m_s: Vec3
+    launch_speed_m_s: float = Field(ge=0)
+    launch_energy_j: float = Field(ge=0)
+    tli_delta_v_m_s: float = Field(ge=0)
+    launch_delta_v_m_s: float = Field(ge=0)
+    arrival_v_infinity_m_s: float = Field(ge=0)
+    arrival_delta_v_m_s: float = Field(ge=0)
+    total_delta_v_m_s: float = Field(ge=0)
+    estimated_total_delta_v_m_s: float = Field(ge=0)
+    min_mars_altitude_m: float
+    path_length_m: float = Field(ge=0)
+    arrival_error_m: float = Field(ge=0)
+    propellant: PropellantResponse
+    tradeoff: list[TradeoffResponse]
+    bodies: dict[Literal["earth", "moon", "sun", "mars"], BodyResponse]
+    samples: list[MarsSampleResponse] = Field(min_length=2)
+
+
+class NoFeasibleMarsResponse(_Response):
+    status: Literal["no_feasible_solution"]
+    destination: Literal["mars"]
+    source: str
+    date: AwareDatetime
+    max_duration_s: float = Field(gt=0)
+    min_search_duration_s: float = Field(gt=0)
+    parking_alt_m: float = Field(ge=0)
+    reasons: list[str]
+    tradeoff: list[TradeoffResponse]
+
+
+MarsResponse = MarsTransferOkResponse | NoFeasibleMarsResponse
