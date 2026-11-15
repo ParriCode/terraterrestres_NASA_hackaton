@@ -1,5 +1,3 @@
-"""Corrección tridimensional de una velocidad inicial mediante shooting."""
-
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -31,15 +29,7 @@ def solve_shooting(
     max_evaluations: int = 100,
     planar: bool = False,
 ) -> ShootingResult:
-    """Ajusta la velocidad para anular el error de posición final.
-
-    ``arrival_residual(v)`` debe propagar la nave con la velocidad ``v`` y
-    devolver ``posición_nave_final - posición_objetivo_final`` en metros. El
-    callback permite reutilizar RK2 ahora y cambiar de integrador más adelante.
-    Con planar=True ajusta únicamente vx y vy mediante Levenberg–Marquardt,
-    fija vz=0 y resuelve el residuo XY, como en el documento de referencia.
-    """
-
+    """Ajusta la velocidad para anular el error de posición final."""
     validate_vec3(initial_velocity_guess_m_s, "initial_velocity_guess_m_s")
     validate_positive(velocity_scale_m_s, "velocity_scale_m_s")
     validate_positive(residual_scale_m, "residual_scale_m")
@@ -66,9 +56,9 @@ def solve_shooting(
         initial,
         method="lm" if planar else "trf",
         max_nfev=max_evaluations,
-        xtol=1e-9,
-        ftol=1e-9,
-        gtol=1e-9,
+        xtol=1e-7,
+        ftol=1e-7,
+        gtol=1e-7,
     )
 
     velocity = tuple(float(value * velocity_scale_m_s) for value in optimization.x)
@@ -81,7 +71,7 @@ def solve_shooting(
         initial_velocity_m_s=velocity,  # type: ignore[arg-type]
         arrival_residual_m=residual,  # type: ignore[arg-type]
         residual_norm_m=residual_norm,
-        converged=bool(optimization.success and residual_norm <= arrival_tolerance_m),
+        converged=bool(optimization.status >= 0 and residual_norm <= arrival_tolerance_m),
         evaluations=int(optimization.nfev),
         message=str(optimization.message),
     )

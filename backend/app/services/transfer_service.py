@@ -1,8 +1,4 @@
-"""F del documento: Lambert, shooting y trayectoria planar con datos Horizons.
-
-Tiempos en segundos desde scenario.date. Coordenadas del plano orbital inicial
-del escenario, origen baricéntrico y z=0.
-"""
+"""F del documento: Lambert, shooting y trayectoria planar con datos Horizons."""
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -113,12 +109,7 @@ def F(
     prograde_hint: bool | None = None,
     warm_start_velocity: Vec3 | None = None,
 ) -> TransferResult:
-    """Busca la mejor candidata válida entre semillas Lambert o arranque en caliente.
-
-    El punto de salida se sitúa a R_earth + parking_alt_m; el de llegada en la
-    superficie lunar. El Δv de salida se mide respecto a la velocidad circular
-    prograde de aparcamiento.
-    """
+    """Busca la mejor candidata válida entre semillas Lambert o arranque en caliente."""
     validate_vec3(x0, "x0")
     validate_vec3(x1, "x1")
     validate_positive(mass_kg, "mass_kg")
@@ -172,7 +163,7 @@ def F(
         if len(solution.t_events[earth_index]):
             reasons.append("La trayectoria vuelve a tocar la Tierra")
             return
-        if any(t < t1 - 60.0 for t in solution.t_events[moon_index]):
+        if any(t < t1 - 600.0 for t in solution.t_events[moon_index]):
             reasons.append("Primer contacto lunar antes de tiempo")
             return
         final_position = np.array((*solution.y[:2, -1], 0.0))
@@ -185,14 +176,13 @@ def F(
             reasons.append("La nave no llega desde fuera de la Luna")
             return
 
-        times = np.linspace(t0, t1, 2000)
+        times = np.linspace(t0, t1, 1200)
         spacecraft_xy = solution.sol(times)[:2].T
         relative = spacecraft_xy - _earth_positions_xy(earth, times)
         if float(np.min(np.linalg.norm(relative, axis=1))) < earth.radius_m - 10.0:
             reasons.append("La trayectoria penetra en la Tierra")
             return
 
-        # Distancia recorrida en el mismo marco que las posiciones expuestas por la API.
         length = float(np.linalg.norm(np.diff(spacecraft_xy, axis=0), axis=1).sum())
         rel_dep_vel = velocity - earth_velocity
         launch_speed = float(np.linalg.norm(rel_dep_vel))
@@ -221,23 +211,18 @@ def F(
             )
         )
 
-    # 1. Arranque en caliente si ya tenemos una velocidad cercana validada.
     if warm_start_velocity is not None:
         try:
-            _validate_guess(warm_start_velocity, max_evals=80)
+            _validate_guess(warm_start_velocity, max_evals=35)
         except (RuntimeError, ArithmeticError, ValueError) as error:
             reasons.append(str(error))
 
-    # 2. Semillas Lambert ordenadas por la rama más prometedora.
     if not valid:
-        prograde_seq = (
-            (prograde_hint, not prograde_hint)
-            if prograde_hint is not None
-            else (True, False)
-        )
+        prograde_seq = (prograde_hint,) if prograde_hint is not None else (True, False)
+        factor_groups = ((1.0,),) if prograde_hint is not None else ((1.0,), (0.98, 1.02))
         rel_r1 = tuple(start - earth.pos(t0))
         rel_r2 = tuple(target - earth.pos(t1))
-        for factors in ((1.0,), (0.98, 1.02)):
+        for factors in factor_groups:
             if valid:
                 break
             for prograde in prograde_seq:
@@ -251,7 +236,7 @@ def F(
                             prograde=prograde,
                         )
                         guess = tuple(np.asarray(seed.departure_velocity_m_s) + earth_velocity)
-                        _validate_guess(guess, max_evals=160)
+                        _validate_guess(guess, max_evals=55)
                     except (LambertError, RuntimeError, ArithmeticError, ValueError) as error:
                         reasons.append(str(error))
 

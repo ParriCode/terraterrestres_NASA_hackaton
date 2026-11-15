@@ -15,7 +15,6 @@ def get_body_position_m(scenario: Scenario, body, t_s: float) -> Vec3:
         return scenario.get_body_pos(body, t_s)
     return body.pos(t_s)
 
-
 def state_derivative(
     t_s: float,
     state: SpacecraftState,
@@ -26,10 +25,20 @@ def state_derivative(
     body_positions_m = {
         body.id: get_body_position_m(scenario, body, t_s) for body in bodies
     }
-    acceleration = gravitational_acceleration(
+    ax, ay, az = gravitational_acceleration(
         state.position_m, body_positions_m, bodies
     )
-    return state.velocity_m_s, acceleration
+    if "sun" in body_positions_m:
+        sun = next((b for b in bodies if b.id == "sun"), None)
+        if sun is not None:
+            bx, by, bz = body_positions_m["sun"]
+            norm_b_sq = bx * bx + by * by + bz * bz
+            if norm_b_sq > 0.0:
+                indirect = sun.mu_m3_s2 / (norm_b_sq * (norm_b_sq ** 0.5))
+                ax -= bx * indirect
+                ay -= by * indirect
+                az -= bz * indirect
+    return state.velocity_m_s, (ax, ay, az)
 
 
 def state_derivative_array(
