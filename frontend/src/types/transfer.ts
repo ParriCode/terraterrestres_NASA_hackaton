@@ -1,9 +1,13 @@
 /** Contrato de POST /transfers (backend/app/controllers/transfer_controller.py). Todo en SI. */
 export type Vec3 = [number, number, number]
 export type TransferObjective = 'energia' | 'distancia'
+export type MissionMode = 'lunar_transfer' | 'lunar_orbit_return'
 
 export type TransferRequest = {
   date: string // ISO 8601 con zona horaria
+  mission_mode?: MissionMode
+  orbit_altitude_km?: number
+  lunar_revolutions?: 1 | 2
   duration_s: number
   launch_angle_deg: number
   objective: TransferObjective
@@ -29,7 +33,34 @@ export type TransferOptimization = {
   global_optimum_guaranteed: false
 }
 
+export type LunarManeuver = {
+  phase: 'inserción_orbital' | 'inyección_retorno'
+  t_s: number
+  delta_v_m_s: number
+  before_m_s: Vec3
+  after_m_s: Vec3
+}
+
+export type LunarOrbitReport = {
+  altitude_km: number
+  revolutions: number
+  actual_revolutions: number
+  orbit_insertion_t_s: number
+  orbit_departure_t_s: number
+  orbital_period_s: number
+  return_arrival_direction_deg: number
+  return_arrival_t_s?: number
+  verified_return: boolean
+}
+
 export type TransferResponse = {
+  mission_mode?: 'lunar_orbit_return'
+  return_interface_radius_m?: number
+  requested_duration_s?: number // duración máxima, puede regresar antes
+  lunar_orbit?: LunarOrbitReport
+  maneuvers?: LunarManeuver[]
+  total_maneuver_delta_v_m_s?: number
+  model_limitations?: string[]
   source: string
   date: string
   frame: 'earth_moon_barycentric_initial_orbital_plane'

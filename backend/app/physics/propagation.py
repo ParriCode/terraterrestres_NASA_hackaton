@@ -18,6 +18,7 @@ def propagate_planar(
     rtol: float = 1e-10,
     atol: float = 1e-6,
     dense_output: bool = True,
+    stop_at_earth_radius_m: float | None = None,
 ):
     bodies = scenario.get_bodies()
     fast_bodies = []
@@ -57,6 +58,14 @@ def propagate_planar(
             ay += factor * dy
         return float(state[2]), float(state[3]), ax, ay
 
+    if stop_at_earth_radius_m is not None:
+        earth = next((body for body in bodies if body.id == "earth"), None)
+        if earth is None or not math.isfinite(stop_at_earth_radius_m) or stop_at_earth_radius_m <= earth.radius_m:
+            raise ValueError("La interfaz terrestre debe ser mayor que el radio físico de la Tierra.")
+        ex, ey = earth.pos(t0)[:2]
+        if math.hypot(float(position_m[0]) - ex, float(position_m[1]) - ey) <= stop_at_earth_radius_m:
+            raise ValueError("El retorno debe comenzar fuera de la esfera terrestre objetivo.")
+
     event_functions = []
     for body, _, _, contact_radius, pos_fast in fast_bodies:
         def contact(t: float, state, body=body, radius=contact_radius, pos_fast=pos_fast):
@@ -66,6 +75,19 @@ def propagate_planar(
         contact.direction = -1
         contact.terminal = not events
         event_functions.append(contact)
+
+    if stop_at_earth_radius_m is not None:
+        earth = next(body for body in bodies if body.id == "earth")
+        motion = getattr(earth, "_motion", None)
+        earth_pos = motion.pos_xy if motion is not None else getattr(earth, "pos_xy_fast", None)
+
+        def return_crossing(t: float, state):
+            ex, ey = earth_pos(t) if earth_pos is not None else earth.pos(t)[:2]
+            return math.hypot(float(state[0]) - ex, float(state[1]) - ey) - stop_at_earth_radius_m
+
+        return_crossing.direction = -1
+        return_crossing.terminal = True
+        event_functions.append(return_crossing)  # Último evento, distinguible de impactos
 
     solution = solve_ivp(
         derivative,

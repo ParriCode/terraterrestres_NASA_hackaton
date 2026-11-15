@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent, WheelEvent } from 'react'
 import type { TransferResponse, TransferSample, TransferState } from '../types/transfer'
-import { clamp } from '../utils/transfer'
+import { clamp, stateAt } from '../utils/transfer'
 import Icon from './Icon'
 import { getEarthMoonEphemeris } from '../api/ephemerides'
 import type { EarthMoonEphemeris } from '../api/ephemerides'
@@ -100,6 +100,10 @@ export default function TransferView({ date, transfer, state, time, visible = tr
     return { past: makePath([...past, now], transfer.basis_icrf), future: makePath([now, ...future], transfer.basis_icrf) }
   }, [transfer, state, time])
 
+  const maneuverPoints = transfer?.maneuvers?.map(m => ({
+    phase: m.phase, position: projectIcrfKm(stateAt(transfer.samples, m.t_s).position_m, transfer.basis_icrf),
+  })) ?? []
+
   function toWorld(e: { clientX: number; clientY: number }) {
     if (!svg.current) return { x: box.x + box.w / 2, y: box.y + box.h / 2 }
     const matrix = svg.current.getScreenCTM()
@@ -159,6 +163,13 @@ export default function TransferView({ date, transfer, state, time, visible = tr
           <path d={segments.past} className="ship-track ship-track-past" stroke={color} strokeWidth={3.2 * unit} />
         </>}
       </>}
+      {visible && maneuverPoints.map(point => <g key={point.phase}>
+        <circle cx={point.position.x} cy={point.position.y} r={6 * unit} fill="#ffb56b" stroke="#141825" strokeWidth={2 * unit}>
+          <title>{point.phase === 'inserción_orbital' ? 'Inserción en órbita lunar' : 'Maniobra de retorno a la Tierra'}</title>
+        </circle>
+        {box.w < 90000 && <text x={point.position.x + 10 * unit} y={point.position.y - 10 * unit}
+          fontSize={12 * unit} className="body-label">{point.phase === 'inserción_orbital' ? 'Inserción orbital' : 'Salida de órbita'}</text>}
+      </g>)}
       {earth && <>
         <circle cx={earth.x} cy={earth.y} r={visualEarth * 1.2} className="earth-glow" />
         <image href="/resource/tierra.svg" x={earth.x - visualEarth} y={earth.y - visualEarth} width={visualEarth * 2} height={visualEarth * 2} />
@@ -178,7 +189,7 @@ export default function TransferView({ date, transfer, state, time, visible = tr
           width={shipIconSize} height={shipIconSize} pointerEvents="none" />}
       </>}
     </svg>
-    <div className="scene-heading scene-heading-local"><span className="eyebrow">SISTEMA TIERRA–LUNA</span><h1>{transfer ? 'Trayectoria calculada' : preview ? 'Posición lunar según JPL' : previewError ? 'Efemérides no disponibles' : 'Consultando NASA/JPL…'}</h1>
+    <div className="scene-heading scene-heading-local"><span className="eyebrow">SISTEMA TIERRA–LUNA</span><h1>{transfer?.mission_mode === 'lunar_orbit_return' ? 'Órbita lunar y regreso' : transfer ? 'Trayectoria calculada' : preview ? 'Posición lunar según JPL' : previewError ? 'Efemérides no disponibles' : 'Consultando NASA/JPL…'}</h1>
       <p>{transfer ? 'La nave sigue las muestras calculadas por el backend.' : previewError || (preview ? `Fecha UTC: ${new Date(preview.date).toLocaleString('es-ES', { timeZone: 'UTC' })}` : 'Descargando las posiciones reales para la fecha seleccionada.')}</p></div>
     <div className="map-tools">
       <button className="icon-button" onClick={onSolar} aria-label="Volver al sistema solar" title="Volver al sistema solar"><Icon name="back" /></button>

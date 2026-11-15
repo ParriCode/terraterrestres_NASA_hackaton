@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, AwareDatetime
 
 from app.data.ephemeris import EphemerisError
 from app.services.transfer_service import TransferNotFoundError, design_transfer, optimize_transfer, TransferResult
+from app.services.lunar_mission_service import design_lunar_orbit_return
 
 router = APIRouter(prefix="/transfers", tags=["Transferencias"])
 
@@ -145,3 +146,42 @@ def optimize(request: OptimizeTransferRequest):
         "global_optimum_guaranteed": False,
     }
     return payload
+
+class LunarOrbitReturnRequest(BaseModel):
+    """Una órbita lunar propulsada y regreso a esfera de 100.000 km de Tierra."""
+    date: AwareDatetime
+    duration_s: float = Field(default=10 * 86400, ge=4 * 86400, le=30 * 86400, allow_inf_nan=False)
+    objective: Literal["energia", "distancia"] = "energia"
+    mass_kg: float = Field(default=1000, gt=0, allow_inf_nan=False)
+    launch_angle_deg: float = Field(default=90, allow_inf_nan=False)
+    orbit_altitude_km: float = Field(default=100, ge=50, le=500, allow_inf_nan=False)
+    lunar_revolutions: Literal[1, 2] = 1
+    samples: int = Field(default=450, ge=100, le=4000)
+
+
+@router.post("/lunar-orbit-return")
+def lunar_orbit_return(request: LunarOrbitReturnRequest):
+    """Propaga ida, inserción orbital, órbita y retorno propulsado.
+
+    Si no se valida un candidato dentro del presupuesto, responde 422.
+    Nunca devuelve una ruta de retorno visual inventada.
+    """
+    try:
+        return design_lunar_orbit_return(
+            request.date, request.duration_s, objective=request.objective,
+            mass_kg=request.mass_kg, samples=request.samples,
+            orbit_altitude_km=request.orbit_altitude_km,
+            lunar_revolutions=request.lunar_revolutions,
+            launch_angle_deg=request.launch_angle_deg,
+        )
+    except EphemerisError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except TransferNotFoundError as error:
+        raise HTTPException(status_code=422, detail={
+            "code": "no_valid_lunar_orbit_return", "message": str(error),
+            "suggestion": "Prueba otra fecha, duración o altitud lunar. La búsqueda acotada no prueba imposibilidad física.",
+        }) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail={
+            "code": "invalid_lunar_mission", "message": str(error),
+        }) from error

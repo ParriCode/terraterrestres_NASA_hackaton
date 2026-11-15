@@ -56,12 +56,16 @@ function isTransferResponse(value: unknown): value is TransferResponse {
 }
 
 export async function requestTransfer(body: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
-  const url = `${API_BASE_URL}/transfers/optimize`
+  const orbitalReturn = body.mission_mode === 'lunar_orbit_return'
+  const url = `${API_BASE_URL}${orbitalReturn ? '/transfers/lunar-orbit-return' : '/transfers/optimize'}`
+  const { mission_mode: _mode, orbit_altitude_km, lunar_revolutions, ...baseBody } = body
+  void _mode
+  const payload = orbitalReturn ? { ...baseBody, orbit_altitude_km, lunar_revolutions } : baseBody
   const timeout = AbortSignal.timeout(TIMEOUT_MS)
   let response: Response
   try {
     response = await fetch(url, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     })
   } catch (error) {
@@ -72,10 +76,10 @@ export async function requestTransfer(body: TransferRequest, signal?: AbortSigna
   const data: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     const detail = describeDetail((data as { detail?: unknown } | null)?.detail) || response.statusText
-    if (response.status === 404 || response.status === 405) throw new ApiError(response.status, "POST /transfers/optimize no está disponible. Comprueba que has aplicado la actualización del backend y reiniciado FastAPI.")
+    if (response.status === 404 || response.status === 405) throw new ApiError(response.status, `El endpoint ${url} no está disponible. Reinicia FastAPI con el backend actualizado.`)
     if (response.status === 422) {
       const code = (data as { detail?: { code?: string } } | null)?.detail?.code
-      if (code === 'no_valid_transfer') {
+      if (code === 'no_valid_transfer' || code === 'no_valid_lunar_orbit_return') {
         throw new ApiError(422, `No se encontró una transferencia válida: ${detail}`)
       }
       throw new ApiError(422, `Revisa los parámetros de la simulación: ${detail}`)
@@ -83,6 +87,10 @@ export async function requestTransfer(body: TransferRequest, signal?: AbortSigna
     if (response.status === 502) throw new ApiError(502, `Fallo al consultar las efemérides de NASA/JPL Horizons: ${detail}`)
     throw new ApiError(response.status, `Error del backend (HTTP ${response.status}): ${detail}`)
   }
-  if (!isTransferResponse(data)) throw new ApiError(0, 'El backend respondió con un formato distinto al esperado para /transfers/optimize (debe incluir arrival_angle_deg elegido por el optimizador).')
+  if (!isTransferResponse(data)) throw new ApiError(0, `Respuesta del backend incompatible con ${url}.`)
+  if (orbitalReturn && (data.mission_mode !== 'lunar_orbit_return' || data.lunar_orbit?.verified_return !== true
+      || !Array.isArray(data.maneuvers) || data.maneuvers.length !== 2)) {
+    throw new ApiError(0, 'El backend no ha confirmado una órbita lunar y retorno validados.')
+  }
   return data
 }

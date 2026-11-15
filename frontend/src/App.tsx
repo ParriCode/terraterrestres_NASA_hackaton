@@ -60,7 +60,7 @@ export default function App() {
       const result = await requestTransfer(request, signal.signal)
       if (signal.signal.aborted) return
       const id = crypto.randomUUID()
-      const title = `${result.objective === 'energia' ? 'Energía mínima' : 'Distancia mínima'} · ${new Date(result.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`
+      const title = `${result.mission_mode === 'lunar_orbit_return' ? 'Órbita lunar + retorno' : (result.objective === 'energia' ? 'Energía mínima' : 'Distancia mínima')} · ${new Date(result.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`
       setJourneys(prev => [...prev, { id, title, response: result, color: COLORS[prev.length % COLORS.length], visible: true }])
       setSelectedId(id); setTime(0); setScene('earth'); setShowForm(false); setShowDrawer(false); setShowResults(true)
     } catch (e) {
@@ -123,7 +123,7 @@ export default function App() {
       </div>}
       {busy && <div className="loading-overlay" role="status" aria-live="polite">
         <div className="loading-card"><img src="/resource/loading_cohete_nubes.svg" alt="Animación de cohete" />
-          <h2>Calculando la transferencia</h2><p>Consultando NASA/JPL Horizons y resolviendo los candidatos…</p>
+          <h2>Calculando la misión</h2><p>Consultando NASA/JPL Horizons y resolviendo los candidatos…</p>
           <button type="button" className="ghost-button" onClick={cancel}>Cancelar cálculo</button>
         </div>
       </div>}
@@ -149,7 +149,7 @@ export default function App() {
           : journeys.map(j => <div key={j.id} className={j.id === selectedId ? 'journey-card selected' : 'journey-card'}>
             <button type="button" className="journey-select" onClick={() => selectJourney(j.id)}>
               <span className="journey-dot" style={{ background: j.color }} /><strong>{j.title}</strong><span className="journey-tag">JPL</span>
-              <small>Tierra <Icon name="arrow" size={11} /> Luna · {formatDuration(j.response.duration_s)}</small>
+              <small>Tierra <Icon name="arrow" size={11} /> Luna{j.response.mission_mode === 'lunar_orbit_return' ? ' (órbita) → Tierra' : ''} · {formatDuration(j.response.duration_s)}</small>
             </button>
             <div className="journey-actions"><button type="button" title={j.visible ? 'Ocultar ruta' : 'Mostrar ruta'}
               aria-label={j.visible ? `Ocultar ${j.title}` : `Mostrar ${j.title}`}
