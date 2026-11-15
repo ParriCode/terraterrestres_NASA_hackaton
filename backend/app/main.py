@@ -12,6 +12,8 @@ from fastapi.responses import JSONResponse
 
 from app.controllers.simulation_controller import router
 from app.controllers.transfer_controller import router as transfer_router
+from app.controllers.ephemeris_controller import router as ephemeris_router
+from app.controllers.mission_controller import router as mission_router
 from app.models.domain import SCHEMA_VERSION
 from app.services.mock_simulation import MOCK_WARNING, build_mock_components
 from app.services.simulation_service import SimulationComponents, run_simulation
@@ -41,7 +43,7 @@ def create_app(
         )
 
     app = FastAPI(
-        title="ORBITAL 4B — API de simulación cislunar",
+        title="ORBITAL4B — API de simulación",
         version="0.1.0",
         description=(
             f"Modo de simulación v1: {mode}. Las rutas /transfers usan efemérides "
@@ -54,8 +56,7 @@ def create_app(
     @app.middleware("http")
     async def identify_simulation_mode(request: Request, call_next):
         response = await call_next(request)
-        path = request.url.path.rstrip("/")
-        effective_mode = "real" if path == "/transfers" or path.startswith("/transfers/") else mode
+        effective_mode = "real" if request.url.path.rstrip("/") in {"/transfers", "/transfers/optimize", "/transfers/lunar-orbit-return"} or request.url.path.rstrip("/") == "/ephemeris/earth-moon" or request.url.path.startswith("/missions/") else mode
         response.headers["X-Simulation-Mode"] = effective_mode
         if effective_mode == "mock":
             response.headers["X-Simulation-Warning"] = MOCK_WARNING
@@ -101,6 +102,8 @@ def create_app(
 
     app.include_router(router)
     app.include_router(transfer_router)
+    app.include_router(ephemeris_router)
+    app.include_router(mission_router)
     return app
 
 

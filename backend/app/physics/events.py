@@ -107,8 +107,8 @@ def swept_collision_closest_fraction(
 ) -> float | None:
     """Fracción de máxima aproximación con corrección opcional por punto medio curvo.
 
-    Si se proporciona el estado real en el punto medio del paso, evita falsos
-    positivos en órbitas circulares bajas donde la cuerda secante corta la esfera.
+    Compatibilidad con la implementación original de ORBITAL4B. NO equivale a
+    la fracción de primer impacto ni certifica el evento orbital real.
     """
     if not math.isfinite(body_radius_m) or body_radius_m <= 0:
         raise ValueError("Invalid body radius")

@@ -161,12 +161,52 @@ def _get_body_state(body: CelestialBody, time: datetime) -> tuple[Vec3, Vec3]:
     if time.utcoffset() is None:
         raise ValueError("time debe incluir zona horaria.")
 
-    horizons_id = _horizons_id_for(body)
-    instant_utc = time.astimezone(timezone.utc)
-    base_ts, spline = _get_window_spline(
-        horizons_id, instant_utc, instant_utc + timedelta(seconds=60)
-    )
-    tau = instant_utc.timestamp() - base_ts
-    p = spline(tau)
-    v = spline(tau, 1)
-    return (float(p[0]), float(p[1]), float(p[2])), (float(v[0]), float(v[1]), float(v[2]))
+
+@lru_cache(maxsize=2048)
+def _fetch_state(horizons_id: str, instant: datetime) -> tuple[Vec3, Vec3]:
+    julian_day = instant.timestamp() / 86400.0 + 2440587.5
+    params = {
+        "format": "json", "COMMAND": horizons_id,
+        "OBJ_DATA": "NO", "MAKE_EPHEM": "YES", "EPHEM_TYPE": "VECTORS",
+        "CENTER": "500@3", "REF_SYSTEM": "ICRF", "REF_PLANE": "FRAME",
+        "TIME_TYPE": "UT", "TLIST": f"{julian_day:.10f}", "TLIST_TYPE": "JD",
+        "OUT_UNITS": "KM-S", "VEC_TABLE": "2", "VEC_CORR": "NONE",
+        "CSV_FORMAT": "YES",
+    }
+    try:
+        with urlopen(
+            f"{HORIZONS_API_URL}?{urlencode(params)}", timeout=HORIZONS_TIMEOUT_S
+        ) as response:
+            payload = json.load(response)
+    except (URLError, TimeoutError, OSError, ValueError) as error:
+        raise EphemerisError(f"Error consultando Horizons: {error}") from error
+    if not isinstance(payload, dict):
+        raise EphemerisError("Horizons devolvió una respuesta inesperada.")
+    if payload.get("error"):
+        raise EphemerisError(str(payload["error"]))
+    return _parse_state(payload.get("result", ""))
+
+
+def _parse_state(result: str) -> tuple[Vec3, Vec3]:
+    try:
+        table = result.split("$$SOE", 1)[1].split("$$EOE", 1)[0].strip()
+        rows = list(csv.reader(io.StringIO(table)))
+        if len(rows) != 1:
+            raise ValueError("Se esperaba una única muestra.")
+        values = [float(value.replace("D", "E")) * 1000 for value in rows[0][2:8]]
+        if len(values) != 6 or not all(math.isfinite(value) for value in values):
+            raise ValueError("Estado inválido.")
+        return (values[0], values[1], values[2]), (values[3], values[4], values[5])
+    except (AttributeError, IndexError, TypeError, ValueError) as error:
+        raise EphemerisError("No se pudo interpretar la posición de Horizons.") from error
+
+
+def get_sun_time_pos(time: datetime) -> Vec3:
+    """Posición del centro del Sol (ID 10) respecto al baricentro Tierra-Luna, ICRF, en metros.
+
+    Utiliza la misma configuración y caché Horizons que las posiciones terrestres.
+    No forma parte del catálogo dinámico de dos cuerpos ni altera la propagación.
+    """
+    if not isinstance(time, datetime) or time.utcoffset() is None:
+        raise ValueError("Se requiere una fecha solar con zona horaria.")
+    return _fetch_state("10", time.astimezone(timezone.utc))[0]

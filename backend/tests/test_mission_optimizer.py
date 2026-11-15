@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 import numpy as np
 import pytest
 
-from app.data.bodies import load_bodies
-from app.data.scenarios import PlanarScenario
+from app.mission.data.bodies import load_bodies
+from app.mission.data.scenarios import PlanarScenario
 from app.services.mission_optimizer import (
     Candidate,
     NoFeasibleTransfer,
@@ -32,7 +32,7 @@ def circular_ephemeris(monkeypatch):
                                       radius * omega * np.cos(omega * times), np.zeros_like(times)))
         return times, positions, velocities
 
-    monkeypatch.setattr("app.data.ephemeris.get_body_state_table", table)
+    monkeypatch.setattr("app.mission.data.ephemeris.get_body_state_table", table)
 
 
 def test_screen_orders_candidates_and_respects_domain(circular_ephemeris):

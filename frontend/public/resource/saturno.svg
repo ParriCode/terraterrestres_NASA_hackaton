@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Saturno">
+<defs>
+<radialGradient id="sphere" cx="30%" cy="24%" r="78%"><stop stop-color="#fff6d5"/><stop offset=".5" stop-color="#d8ba83"/><stop offset="1" stop-color="#80624d"/></radialGradient>
+<linearGradient id="rings" x1="0" y1="0" x2="1" y2=".4"><stop stop-color="#8a725a"/><stop offset=".3" stop-color="#e9d6b1"/><stop offset=".65" stop-color="#b79a74"/><stop offset="1" stop-color="#f4e5c8"/></linearGradient>
+<clipPath id="planet"><circle cx="256" cy="256" r="154"/></clipPath>
+<clipPath id="front"><rect x="-300" y="0" width="600" height="270"/></clipPath>
+</defs>
+<!-- Rear half of the rings -->
+<g transform="translate(256 256) rotate(-23)" fill="none">
+<ellipse rx="225" ry="76" stroke="#806e57" stroke-width="37" opacity=".85"/>
+<ellipse rx="225" ry="76" stroke="url(#rings)" stroke-width="30"/>
+<ellipse rx="225" ry="76" stroke="#f9ebc9" stroke-width="8" opacity=".85"/>
+<ellipse rx="225" ry="76" stroke="#6f6054" stroke-width="2" opacity=".8"/>
+<ellipse rx="188" ry="63" stroke="#a38b70" stroke-width="6" opacity=".9"/>
+<ellipse rx="250" ry="84" stroke="#d9c29d" stroke-width="5" opacity=".65"/>
+</g>
+<!-- Planet occludes the rear rings -->
+<circle cx="256" cy="256" r="154" fill="url(#sphere)"/>
+<g clip-path="url(#planet)">
+<path d="M95 157 Q256 140 417 157 M90 190 Q256 174 422 190" fill="none" stroke="#f8e6bc" stroke-width="13" opacity=".45"/>
+<path d="M85 229 Q256 211 427 229 M85 273 Q256 254 427 273" fill="none" stroke="#a68460" stroke-width="12" opacity=".38"/>
+<path d="M90 315 Q256 300 422 315 M100 348 Q256 336 412 348" fill="none" stroke="#f9e8c1" stroke-width="10" opacity=".42"/>
+</g>
+<!-- Near half of rings, accurately clipped in ring-local coordinates -->
+<g transform="translate(256 256) rotate(-23)" clip-path="url(#front)" fill="none">
+<ellipse rx="225" ry="76" stroke="#806e57" stroke-width="37" opacity=".85"/>
+<ellipse rx="225" ry="76" stroke="url(#rings)" stroke-width="30"/>
+<ellipse rx="225" ry="76" stroke="#f9ebc9" stroke-width="8" opacity=".85"/>
+<ellipse rx="225" ry="76" stroke="#6f6054" stroke-width="2" opacity=".8"/>
+<ellipse rx="188" ry="63" stroke="#a38b70" stroke-width="6" opacity=".9"/>
+<ellipse rx="250" ry="84" stroke="#d9c29d" stroke-width="5" opacity=".65"/>
+</g></svg>

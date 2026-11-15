@@ -1,18 +1,5 @@
-import type {
-  OptimizeTransferNoFeasibleResponse,
-  OptimizeTransferOkResponse,
-  OptimizeTransferRequest,
-  OptimizeTransferResponse,
-  RoundTripNoFeasibleResponse,
-  RoundTripOkResponse,
-  RoundTripRequest,
-  RoundTripResponse,
-  TradeoffPoint,
-  TransferRequest,
-  TransferResponse,
-  TransferSample,
-  Vec3,
-} from '../types/transfer'
+import type { TransferRequest, TransferResponse, Vec3 } from '../types/transfer'
+import { requestOptimizedOutbound, requestRoundTripMission } from './missions'
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
 const TIMEOUT_MS = 5 * 60_000
@@ -32,11 +19,11 @@ function describeDetail(detail: unknown): string {
   if (typeof detail === 'string') return detail
   if (Array.isArray(detail)) return detail.map(e => (e as ValidationItem).msg).join(' · ')
   if (detail && typeof detail === 'object') {
-    const d = detail as { message?: string; errors?: ValidationItem[] }
+    const d = detail as { message?: string; suggestion?: string; errors?: ValidationItem[] }
     const items = Array.isArray(d.errors)
       ? d.errors.map(e => `${(e.loc ?? []).filter(l => l !== 'body').join('.')}: ${e.msg ?? ''}`)
       : []
-    return [d.message, ...items].filter(Boolean).join(' · ') || JSON.stringify(detail)
+    return [d.message, d.suggestion, ...items].filter(Boolean).join(' · ') || JSON.stringify(detail)
   }
   return ''
 }
@@ -90,106 +77,43 @@ function isTradeoffList(value: unknown): value is TradeoffPoint[] {
 function isTransferResponse(value: unknown): value is TransferResponse {
   if (!value || typeof value !== 'object') return false
   const r = value as Partial<TransferResponse>
-  return (
-    isValidFrame(r.frame) &&
-    typeof r.date === 'string' &&
-    Number.isFinite(Date.parse(r.date)) &&
-    isVec3(r.initial_velocity_m_s) &&
-    isNum(r.launch_speed_m_s) &&
-    isNum(r.launch_energy_j) &&
-    isNum(r.path_length_m) &&
-    isNum(r.arrival_error_m) &&
-    isNum(r.duration_s) &&
-    isNum(r.bodies?.earth?.radius_m) &&
-    isNum(r.bodies?.moon?.radius_m) &&
-    isValidSamples(r.samples)
-  )
+  const s = r.samples
+  return r.frame === 'earth_moon_barycentric_initial_orbital_plane'
+    && typeof r.date === 'string' && Number.isFinite(Date.parse(r.date))
+    && isVec3(r.initial_velocity_m_s) && isNum(r.launch_speed_m_s) && isNum(r.launch_energy_j)
+    && isNum(r.path_length_m) && isNum(r.arrival_error_m) && isNum(r.duration_s) && isNum(r.arrival_angle_deg)
+    && isNum(r.bodies?.earth?.radius_m) && isNum(r.bodies?.moon?.radius_m)
+    && (r.optimization === undefined || (r.optimization.method === 'bounded_angle_search'
+      && Array.isArray(r.optimization.attempted_angles_deg)
+      && r.optimization.attempted_angles_deg.every(isNum)
+      && isNum(r.optimization.valid_candidates)
+      && Array.isArray(r.optimization.timed_out_angles_deg)
+      && r.optimization.timed_out_angles_deg.every(isNum)
+      && typeof r.optimization.search_complete === 'boolean'
+      && r.optimization.global_optimum_guaranteed === false))
+    && Array.isArray(s) && s.length >= 2 && s[0].t_s === 0
+    && s.every((p, i) => isNum(p.t_s) && (i === 0 || p.t_s > s[i - 1].t_s)
+      && isVec3(p.position_m) && isVec3(p.velocity_m_s)
+      && isVec3(p.body_positions_m?.earth) && isVec3(p.body_positions_m?.moon))
 }
 
-function isOptimizeOkResponse(value: unknown): value is Omit<OptimizeTransferOkResponse, 'kind'> {
-  if (!isTransferResponse(value)) return false
-  const r = value as Partial<OptimizeTransferOkResponse>
-  return (
-    r.status === 'ok' &&
-    isNum(r.max_duration_s) &&
-    isNum(r.min_search_duration_s) &&
-    isNum(r.parking_alt_m) &&
-    isNum(r.launch_delta_v_m_s) &&
-    isNum(r.arrival_v_infinity_m_s) &&
-    isNum(r.arrival_delta_v_m_s) &&
-    isNum(r.total_delta_v_m_s) &&
-    isTradeoffList(r.tradeoff)
-  )
-}
-
-function isOptimizeNoFeasibleResponse(
-  value: unknown,
-): value is Omit<OptimizeTransferNoFeasibleResponse, 'kind'> {
-  if (!value || typeof value !== 'object') return false
-  const r = value as Partial<OptimizeTransferNoFeasibleResponse>
-  return (
-    r.status === 'no_feasible_solution' &&
-    typeof r.date === 'string' &&
-    Number.isFinite(Date.parse(r.date)) &&
-    isNum(r.max_duration_s) &&
-    isNum(r.min_search_duration_s) &&
-    isNum(r.parking_alt_m) &&
-    Array.isArray(r.reasons) &&
-    r.reasons.every(item => typeof item === 'string') &&
-    isTradeoffList(r.tradeoff)
-  )
-}
-
-function isRoundTripOkResponse(value: unknown): value is Omit<RoundTripOkResponse, 'kind'> {
-  if (!value || typeof value !== 'object') return false
-  const r = value as Partial<RoundTripOkResponse>
-  return (
-    r.status === 'ok' &&
-    (r.mode === 'free_return' || r.mode === 'lunar_orbit') &&
-    isValidFrame(r.frame) &&
-    typeof r.date === 'string' &&
-    Number.isFinite(Date.parse(r.date)) &&
-    isNum(r.outbound_duration_s) &&
-    isNum(r.lunar_stay_s) &&
-    isNum(r.inbound_duration_s) &&
-    isNum(r.total_duration_s) &&
-    isNum(r.tli_delta_v_m_s) &&
-    isNum(r.loi_delta_v_m_s) &&
-    isNum(r.tei_delta_v_m_s) &&
-    isNum(r.total_delta_v_m_s) &&
-    isNum(r.min_lunar_altitude_m) &&
-    isNum(r.earth_reentry_altitude_m) &&
-    isNum(r.bodies?.earth?.radius_m) &&
-    isNum(r.bodies?.moon?.radius_m) &&
-    isValidSamples(r.samples)
-  )
-}
-
-function isRoundTripNoFeasibleResponse(
-  value: unknown,
-): value is Omit<RoundTripNoFeasibleResponse, 'kind'> {
-  if (!value || typeof value !== 'object') return false
-  const r = value as Partial<RoundTripNoFeasibleResponse>
-  return (
-    r.status === 'no_feasible_solution' &&
-    (r.mode === 'free_return' || r.mode === 'lunar_orbit') &&
-    typeof r.date === 'string' &&
-    Number.isFinite(Date.parse(r.date)) &&
-    isNum(r.max_total_duration_s) &&
-    Array.isArray(r.reasons) &&
-    r.reasons.every(item => typeof item === 'string')
-  )
-}
-
-async function postJson(path: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
-  const url = `${API_BASE_URL}${path}`
+export async function requestTransfer(body: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
+  if (body.mission_mode === 'lunar_orbit_return' || body.mission_mode === 'free_return') {
+    return requestRoundTripMission(body, signal)
+  }
+  if (body.objective === 'energia') return requestOptimizedOutbound(body, signal)
+  const orbitalReturn = false
+  const url = `${API_BASE_URL}${orbitalReturn ? '/transfers/lunar-orbit-return' : '/transfers/optimize'}`
+  const { mission_mode: _mode, orbit_altitude_km, lunar_stay_s, ...baseBody } = body
+  void _mode
+  void orbit_altitude_km
+  void lunar_stay_s
+  const payload = baseBody
   const timeout = AbortSignal.timeout(TIMEOUT_MS)
   let response: Response
   try {
     response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     })
   } catch (error) {
@@ -203,9 +127,21 @@ async function postJson(path: string, body: unknown, signal?: AbortSignal): Prom
   const data: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     const detail = describeDetail((data as { detail?: unknown } | null)?.detail) || response.statusText
-    if (response.status === 422) throw new ApiError(422, `No se pudo calcular la transferencia: ${detail}`)
+    if (response.status === 404 || response.status === 405) throw new ApiError(response.status, `El endpoint ${url} no está disponible. Reinicia FastAPI con el backend actualizado.`)
+    if (response.status === 422) {
+      const code = (data as { detail?: { code?: string } } | null)?.detail?.code
+      if (code === 'no_valid_transfer' || code === 'no_valid_lunar_orbit_return') {
+        throw new ApiError(422, `No se encontró una transferencia válida: ${detail}`)
+      }
+      throw new ApiError(422, `Revisa los parámetros de la simulación: ${detail}`)
+    }
     if (response.status === 502) throw new ApiError(502, `Fallo al consultar las efemérides de NASA/JPL Horizons: ${detail}`)
     throw new ApiError(response.status, `Error del backend (HTTP ${response.status}): ${detail}`)
+  }
+  if (!isTransferResponse(data)) throw new ApiError(0, `Respuesta del backend incompatible con ${url}.`)
+  if (orbitalReturn && (data.mission_mode !== 'lunar_orbit_return' || data.lunar_orbit?.verified_return !== true
+      || !Array.isArray(data.maneuvers) || data.maneuvers.length !== 2)) {
+    throw new ApiError(0, 'El backend no ha confirmado una órbita lunar y retorno validados.')
   }
   return data
 }

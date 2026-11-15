@@ -7,32 +7,30 @@ import TradeoffChart from './components/TradeoffChart'
 import TransferForm from './components/TransferForm'
 import TransferSummary from './components/TransferSummary'
 import TransferView from './components/TransferView'
-import type { MissionResponse, MissionSubmitPayload } from './types/transfer'
-import { stateAt } from './utils/transfer'
+import type { TransferRequest, TransferResponse } from './types/transfer'
+import { formatDuration, formatUtc, stateAt } from './utils/transfer'
+
+type Journey = { id: string; title: string; response: TransferResponse; visible: boolean; color: string }
+const COLORS = ['#64ead5', '#f7ba68', '#80aaff', '#f297c1', '#cc9eff', '#7cd6ff']
 
 export default function App() {
-  const [result, setResult] = useState<MissionResponse | null>(null)
+  const [journeys, setJourneys] = useState<Journey[]>([])
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [showForm, setShowForm] = useState(true)
+  const [showDrawer, setShowDrawer] = useState(false)
+  const [showResults, setShowResults] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [time, setTime] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState(21600)
-  const pending = useRef<AbortController | null>(null)
-  const timeRef = useRef(0)
+  const controller = useRef<AbortController | null>(null)
+  const [previewDate, setPreviewDate] = useState(() => new Date())
 
-  useEffect(() => () => { pending.current?.abort() }, [])
-
-  function seek(t: number) {
-    timeRef.current = t
-    setTime(t)
-  }
-
-  const transfer = result?.status === 'ok' ? result : null
-  const noFeasible = result?.status === 'no_feasible_solution' ? result : null
-  const duration = transfer
-    ? (transfer.kind === 'round_trip' ? transfer.total_duration_s : transfer.duration_s)
-    : 0
-  const state = useMemo(() => (transfer ? stateAt(transfer.samples, time) : null), [transfer, time])
+  const selected = journeys.find(j => j.id === selectedId) ?? null
+  const transfer = selected?.response ?? null
+  const duration = transfer?.duration_s ?? 0
+  const state = useMemo(() => transfer ? stateAt(transfer.samples, time) : null, [transfer, time])
 
   useEffect(() => {
     if (!playing || !duration) return
@@ -50,73 +48,106 @@ export default function App() {
     return () => cancelAnimationFrame(frame)
   }, [playing, speed, duration])
 
-  async function calculate(mission: MissionSubmitPayload) {
-    pending.current?.abort()
-    const controller = new AbortController()
-    pending.current = controller
-    setBusy(true); setError(''); setPlaying(false); setResult(null); seek(0)
+  async function calculate(request: TransferRequest) {
+    controller.current?.abort()
+    const signal = new AbortController()
+    controller.current = signal
+    setBusy(true); setError(''); setPlaying(false)
     try {
-      const response =
-        mission.kind === 'one_way'
-          ? await requestOptimizedTransfer(mission.payload, controller.signal)
-          : await requestRoundTripTransfer(mission.payload, controller.signal)
-      if (pending.current !== controller) return
-      setResult(response); seek(0)
+      const result = await requestTransfer(request, signal.signal)
+      if (signal.signal.aborted) return
+      const id = crypto.randomUUID()
+      const title = `${result.mission_mode === 'lunar_orbit_return' ? 'Apolo 11' : result.mission_mode === 'free_return' ? 'Apolo 8/13' : result.mission_one_way_delta_v_m_s != null ? 'Transferencia directa · ORBITAL4B' : 'Energía mínima'} · ${new Date(result.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`
+      setJourneys(prev => [...prev, { id, title, response: result, color: COLORS[prev.length % COLORS.length], visible: true }])
+      setSelectedId(id); setTime(0); setShowForm(false); setShowDrawer(false); setShowResults(true)
     } catch (e) {
-      if (controller.signal.aborted) return
-      setError(e instanceof ApiError || e instanceof Error ? e.message : 'Error desconocido al calcular la misión.')
+      if (signal.signal.aborted) return
+      setError(e instanceof ApiError || e instanceof Error ? e.message : 'Error desconocido al calcular la transferencia.')
+      setShowForm(true)
     } finally {
-      if (pending.current === controller) { pending.current = null; setBusy(false) }
+      if (controller.current === signal) { controller.current = null; setBusy(false) }
     }
   }
-
-  function cancel() { pending.current?.abort(); pending.current = null; setBusy(false) }
-  function toggle() {
-    if (!playing && time >= duration) seek(0)
+  function cancel() { controller.current?.abort(); controller.current = null; setBusy(false) }
+  function selectJourney(id: string) {
+    setSelectedId(id); setTime(0); setPlaying(false)
+    setShowDrawer(false); setShowForm(false); setShowResults(true)
+  }
+  function deleteJourney(id: string) {
+    setJourneys(prev => prev.filter(j => j.id !== id))
+    if (selectedId === id) { setSelectedId(null); setTime(0); setPlaying(false); setShowResults(false) }
+  }
+  function togglePlayback() {
+    if (!transfer) return
+    if (!playing && time >= duration) setTime(0)
     setPlaying(p => !p)
   }
+  const sceneDate = transfer ? new Date(new Date(transfer.date).getTime() + time * 1000) : previewDate
 
   return <div className="app-shell">
     <header className="topbar">
       <div className="brand"><span className="brand-logo"><Icon name="orbit" size={24} /></span>
-        <div className="brand-type"><div>ORBITAL<span>4B</span></div><small>PLANIFICADOR CISLUNAR TIERRA–LUNA</small></div></div>
+        <div className="brand-type"><div>ORBITAL<span>4B</span></div><small>EXPLORACIÓN TIERRA–LUNA</small></div></div>
+      <div className="nav-actions">
+        <button type="button" className="nav-button" onClick={() => { setShowForm(true); setShowDrawer(false) }}>
+          <Icon name="plus" size={14} /> <span>Nueva misión</span></button>
+        {selected && <button type="button" className="nav-button subtle-nav" onClick={() => { setShowResults(v => !v); setShowForm(false) }}>
+          <Icon name="layers" size={15} /><span>Resultados</span></button>}
+        <button type="button" className="nav-button menu-button" aria-expanded={showDrawer} aria-label="Abrir lista de viajes"
+          onClick={() => { setShowDrawer(v => !v); setShowForm(false) }}>
+          <Icon name="bars" size={19} /><span>Viajes {journeys.length > 0 ? `(${journeys.length})` : ''}</span></button>
+      </div>
     </header>
-    <main className="layout">
-      <section className="side-panel">
-        <TransferForm busy={busy} onSubmit={calculate} onCancel={cancel} />
-        {error && <div role="alert" className="error-box"><Icon name="alert" size={17} /><span>{error}</span>
-          <button onClick={() => setError('')} aria-label="Cerrar error"><Icon name="x" size={14} /></button></div>}
-        {noFeasible && <aside className="no-feasible-box" role="status">
-          <h2><Icon name="alert" size={16} />Sin solución factible</h2>
-          {noFeasible.kind === 'one_way' ? (
-            <p>Límite pedido: {(noFeasible.max_duration_s / 86400).toLocaleString('es-ES', { maximumFractionDigits: 2 })} días · Dominio mínimo: {(noFeasible.min_search_duration_s / 86400).toLocaleString('es-ES', { maximumFractionDigits: 2 })} días</p>
-          ) : (
-            <p>Duración máxima pedida: {(noFeasible.max_total_duration_s / 86400).toLocaleString('es-ES', { maximumFractionDigits: 2 })} días</p>
-          )}
-          <ul>{noFeasible.reasons.map((reason, idx) => <li key={idx}>{reason}</li>)}</ul>
-        </aside>}
-        {transfer && state && <TransferSummary transfer={transfer} state={state} />}
-        {result?.kind === 'one_way' && <TradeoffChart
-          tradeoff={result.tradeoff}
-          maxDurationS={result.max_duration_s}
-          validated={transfer?.kind === 'one_way' ? { duration_s: transfer.duration_s, total_delta_v_m_s: transfer.total_delta_v_m_s } : undefined}
-        />}
-      </section>
-      <section className="stage">
-        {transfer && state ? <>
-          <TransferView transfer={transfer} state={state} />
-          <PlaybackControls start={new Date(transfer.date)} duration={duration} time={time} playing={playing} speed={speed}
-            onToggle={toggle} onReset={() => { setPlaying(false); seek(0) }}
-            onTime={t => { setPlaying(false); seek(t) }} onSpeed={setSpeed} />
-        </> : noFeasible ? <div className="stage-empty no-feasible-stage">
-          <Icon name="alert" size={40} />
-          <p>No existe trayectoria validada dentro del tiempo máximo especificado.</p>
-          <small>Amplía el tiempo máximo de vuelo o revisa las razones en el panel izquierdo.</small>
-        </div> : <div className="stage-empty">
-          <Icon name={busy ? 'clock' : 'globe'} size={40} />
-          <p>{busy ? 'Consultando NASA/JPL Horizons y propagando la trayectoria…' : 'Elige el perfil de misión y pulsa «Calcular».'}</p>
-        </div>}
-      </section>
+    <main className="stage">
+      <TransferView date={sceneDate} transfer={transfer} state={state} time={time}
+        visible={selected?.visible ?? false} color={selected?.color} />
+      {showForm && <div className="mission-panel panel-surface" aria-label="Configuración de transferencia">
+        <button className="panel-close" type="button" onClick={() => setShowForm(false)} aria-label="Cerrar formulario"><Icon name="x" size={16} /></button>
+        <TransferForm busy={busy} onSubmit={calculate} onCancel={cancel} onDateChange={setPreviewDate} />
+        {error && <div role="alert" className="error-box"><Icon name="alert" size={18} /><span>{error}</span></div>}
+      </div>}
+      {selected && state && showResults && !showForm && <div className="results-overlay panel-surface">
+        <button className="panel-close" type="button" aria-label="Cerrar resultados" onClick={() => setShowResults(false)}><Icon name="x" size={16} /></button>
+        <TransferSummary transfer={selected.response} state={state} />
+      </div>}
+      {busy && <div className="loading-overlay" role="status" aria-live="polite">
+        <div className="loading-card"><img src="/resource/loading_cohete_nubes.svg" alt="Animación de cohete" />
+          <h2>Calculando la misión</h2><p>Consultando NASA/JPL Horizons y resolviendo los candidatos…</p>
+          <button type="button" className="ghost-button" onClick={cancel}>Cancelar cálculo</button>
+        </div>
+      </div>}
+      {transfer && <div className="timeline-overlay">
+        <div className="timeline-head"><Icon name="clock" size={15} /><span>{selected?.title}</span>
+          <span className="timeline-mode">{formatUtc(sceneDate)}</span>
+          <button type="button" title="Deseleccionar misión" aria-label="Deseleccionar misión" className="timeline-clear"
+            onClick={() => { setSelectedId(null); setPlaying(false); setShowResults(false) }}><Icon name="x" size={13} /></button></div>
+        <PlaybackControls start={new Date(transfer.date)} duration={duration} time={time} playing={playing} speed={speed}
+          onToggle={togglePlayback} onReset={() => { setPlaying(false); setTime(0) }}
+          onTime={t => { setPlaying(false); setTime(t) }} onSpeed={setSpeed} />
+      </div>}
+      <div className="source-disclaimer">{transfer ? 'Tierra–Luna: posiciones de los cuerpos y trayectoria devueltas por el backend. Sol: dirección JPL consultada aparte.' : 'Tierra–Luna: posiciones NASA/JPL Horizons; sin simulación de nave hasta crear una misión.'}</div>
     </main>
+    {showDrawer && <>
+      <button className="drawer-backdrop" aria-label="Cerrar menú de viajes" onClick={() => setShowDrawer(false)} />
+      <aside className="journey-drawer" aria-label="Mis viajes">
+        <div className="drawer-head"><div><small>CENTRO DE MISIONES</small><h2>Mis viajes <span>{journeys.length}</span></h2></div>
+          <button type="button" className="icon-button" aria-label="Cerrar menú de viajes" onClick={() => setShowDrawer(false)}><Icon name="x" /></button></div>
+        <div className="drawer-scroll">{journeys.length === 0
+          ? <div className="drawer-empty"><Icon name="rocket" size={30} /><h3>No hay viajes todavía</h3><p>Configura una transferencia para ver su trayectoria.</p></div>
+          : journeys.map(j => <div key={j.id} className={j.id === selectedId ? 'journey-card selected' : 'journey-card'}>
+            <button type="button" className="journey-select" onClick={() => selectJourney(j.id)}>
+              <span className="journey-dot" style={{ background: j.color }} /><strong>{j.title}</strong><span className="journey-tag">JPL</span>
+              <small>Tierra <Icon name="arrow" size={11} /> Luna{j.response.mission_mode === 'lunar_orbit_return' ? ' (órbita) → Tierra' : j.response.mission_mode === 'free_return' ? ' (sobrevuelo) → Tierra' : ''} · {formatDuration(j.response.duration_s)}</small>
+            </button>
+            <div className="journey-actions"><button type="button" title={j.visible ? 'Ocultar ruta' : 'Mostrar ruta'}
+              aria-label={j.visible ? `Ocultar ${j.title}` : `Mostrar ${j.title}`}
+              onClick={() => setJourneys(prev => prev.map(v => v.id === j.id ? { ...v, visible: !v.visible } : v))}>
+              <Icon name={j.visible ? 'eye' : 'eye-off'} size={16} />{j.visible ? 'Visible' : 'Oculta'}</button>
+              <button type="button" aria-label={`Eliminar ${j.title}`} title="Eliminar viaje" onClick={() => deleteJourney(j.id)}><Icon name="trash" size={15} /></button></div>
+          </div>)}</div>
+        <div className="drawer-footer"><button type="button" className="primary-button" onClick={() => { setShowDrawer(false); setShowForm(true) }}>
+          <Icon name="plus" size={15} />Crear viaje</button></div>
+      </aside>
+    </>}
   </div>
 }
