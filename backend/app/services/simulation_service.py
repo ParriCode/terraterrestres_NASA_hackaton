@@ -1,7 +1,7 @@
-"""Coordinación de simulación: escenario -> propagación -> diagnóstico -> resultado.
+"""Coordinación de Rafa: escenario -> propagación -> diagnóstico -> resultado.
 
 ScenarioContext y PropagationOutput son interfaces locales para los adaptadores.
-No requieren modificar los modelos compartidos ni los proveedores de datos.
+No exigen cambiar las clases ni los archivos de los demás compañeros.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ class InvalidSimulationInputError(SimulationServiceError):
 
 @dataclass(frozen=True)
 class ScenarioContext:
-    """Adaptador de propiedades y posiciones para un mismo escenario."""
+    """Adaptador de Parri: propiedades y posiciones para un mismo escenario."""
 
     scenario_id: str
     bodies: list[CelestialBody]
@@ -49,7 +49,7 @@ class ScenarioContext:
 
 @dataclass(frozen=True)
 class PropagationOutput:
-    """Trayectoria y eventos antes del diagnóstico."""
+    """Adaptador de Li: trayectoria y eventos antes del diagnóstico."""
 
     status: SimulationStatus
     samples: list[TrajectorySample]
@@ -58,7 +58,7 @@ class PropagationOutput:
 
 @dataclass(frozen=True)
 class SimulationComponents:
-    """Dependencias para cargar escenarios, propagar y diagnosticar."""
+    """Tres funciones que se sustituirán por los adaptadores del equipo."""
 
     load_scenario: Callable[[str], ScenarioContext]
     propagate: Callable[[SimulationConfig, ScenarioContext], PropagationOutput]
@@ -96,18 +96,18 @@ def run_simulation(
             "de escenarios, propagación y diagnóstico."
         )
 
-    # 1. Obtener cuerpos y proveedor de posiciones.
+    # 1. Parri: obtener cuerpos y proveedor de posiciones.
     scenario = components.load_scenario(config.scenario_id)
     if scenario.scenario_id != config.scenario_id:
         raise RuntimeError("El proveedor devolvió un escenario distinto del solicitado.")
 
-    # 2. Propagar el estado y detectar los eventos.
+    # 2. Li: ejecutar RK2 y detectar eventos, cuando esté conectado el motor real.
     propagation = components.propagate(config, scenario)
 
-    # 3. Resumir la trayectoria realmente obtenida.
+    # 3. Angel: resumir la trayectoria realmente obtenida.
     diagnostics = components.diagnose(propagation.samples, scenario.bodies)
 
-    # 4. Conservar la configuración y construir la respuesta compartida.
+    # 4. Rafa: conservar la configuración y construir la respuesta compartida.
     return SimulationResult(
         config=config,
         bodies=scenario.bodies,

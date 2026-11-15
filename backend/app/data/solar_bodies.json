@@ -1,0 +1,79 @@
+{
+  "source": {
+    "url": "https://ssd.jpl.nasa.gov/api/horizons.api",
+    "retrieved_at_utc": "2026-11-15T09:57:22.666495+00:00",
+    "notes": "OBJ_DATA=YES, MAKE_EPHEM=NO; volumetric mean radius and body GM, converted to SI"
+  },
+  "bodies": {
+    "sun": {
+      "id": "sun",
+      "name": "Sol",
+      "horizons_id": "10",
+      "radius_m": 695700000.0,
+      "mu_m3_s2": 1.3271244004193937e+20
+    },
+    "mercury": {
+      "id": "mercury",
+      "name": "Mercurio",
+      "horizons_id": "199",
+      "radius_m": 2439400.0,
+      "mu_m3_s2": 22031868550000.0
+    },
+    "venus": {
+      "id": "venus",
+      "name": "Venus",
+      "horizons_id": "299",
+      "radius_m": 6051840.0,
+      "mu_m3_s2": 324858592000000.0
+    },
+    "earth": {
+      "id": "earth",
+      "name": "Tierra",
+      "horizons_id": "399",
+      "radius_m": 6371010.0,
+      "mu_m3_s2": 398600435436000.0
+    },
+    "moon": {
+      "id": "moon",
+      "name": "Luna",
+      "horizons_id": "301",
+      "radius_m": 1737530.0,
+      "mu_m3_s2": 4902800066000.0
+    },
+    "mars": {
+      "id": "mars",
+      "name": "Marte",
+      "horizons_id": "499",
+      "radius_m": 3389920.0,
+      "mu_m3_s2": 42828375662000.0
+    },
+    "jupiter": {
+      "id": "jupiter",
+      "name": "Júpiter",
+      "horizons_id": "599",
+      "radius_m": 69911000.0,
+      "mu_m3_s2": 1.266865319e+17
+    },
+    "saturn": {
+      "id": "saturn",
+      "name": "Saturno",
+      "horizons_id": "699",
+      "radius_m": 58232000.0,
+      "mu_m3_s2": 3.7931206234e+16
+    },
+    "uranus": {
+      "id": "uranus",
+      "name": "Urano",
+      "horizons_id": "799",
+      "radius_m": 25362000.0,
+      "mu_m3_s2": 5793950610300000.0
+    },
+    "neptune": {
+      "id": "neptune",
+      "name": "Neptuno",
+      "horizons_id": "899",
+      "radius_m": 24624000.0,
+      "mu_m3_s2": 6835099970000000.0
+    }
+  }
+}

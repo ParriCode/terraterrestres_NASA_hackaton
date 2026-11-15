@@ -3,6 +3,7 @@ import type { EarthMoonEphemeris, SunDirectionEphemeris } from '../api/ephemerid
 import { directionToScene, sampleCubic, toScene, vAdd, vCross, vDot, vLength, vMul, vNormalize, vSub } from '../utils/icrf3d'
 import type { Vector3 } from '../utils/icrf3d'
 import { capBodyRadius, shipScaleForClearance } from '../utils/visualScale3d'
+import { createSpaceFit } from '../utils/sceneProjection3d'
 
 /** Visor WebGL sin dependencias ni motores de física en el navegador. */
 type Mat4 = Float32Array
@@ -73,6 +74,11 @@ void main() {
     rgb = mix(rgb,vec3(0.25,0.27,0.31),maria*0.53);
     rgb -= spots*0.11;
     rgb *= 0.16 + 0.92*sun;
+  } else if (uKind > 5.5) { // Marte, Venus y planetas: coloreado mineral con relieve
+    float terrain = fbm(p*8.0 + vec3(1.2,0.5,3.4));
+    float craters = pow(noise3(p*64.0),7.0);
+    rgb = mix(uColor*0.48, uColor*1.15, terrain) - vec3(0.12)*craters;
+    rgb *= 0.13 + 0.96*sun;
   } else if (uKind < 2.5) { // Geometría del cohete
     rgb = uColor*(0.30 + 0.72*sun) + uColor*0.06*pow(max(dot(reflect(-normalize(uSun),n),eye),0.0),18.0);
   } else if (uKind > 3.5 && uKind < 4.5) { // Sol representativo, emisivo y fuera de escala
@@ -231,6 +237,17 @@ function createStars(gl:WebGLRenderingContext):Track {
   return createTrack(gl,points)
 }
 
+function bodyMaterial(id:string):{kind:number;color:Vector3}{
+  if(id==='earth')return {kind:0,color:[1,1,1]}
+  if(id==='moon')return {kind:1,color:[.9,.9,.9]}
+  if(id==='sun')return {kind:4,color:[1,.8,.3]}
+  const colors:Record<string,Vector3>={
+    mercury:[.71,.7,.68],venus:[.94,.72,.46],mars:[.95,.38,.18],
+    jupiter:[.84,.63,.48],saturn:[.92,.79,.58],uranus:[.52,.87,.9],neptune:[.3,.48,.98],
+  }
+  return {kind:6,color:colors[id]??[.72,.74,.82]}
+}
+
 /** Reutilizar recursos GPU entre fotogramas; el backend sigue siendo autoridad de posiciones. */
 export class SpaceRenderer {
   private readonly gl:WebGLRenderingContext
@@ -263,6 +280,10 @@ export class SpaceRenderer {
   private lastPosition:{earth:Vector3|null;moon:Vector3|null;ship:Vector3|null}={earth:null,moon:null,ship:null}
   private dragging:{x:number;y:number;button:number;target:Vector3}|null=null
   private minDistances={earth:Infinity,moon:Infinity}
+  private center:Vector3=[0,0,0]
+  private worldScale=1
+  private originId='earth'
+  private destinationId='moon'
   private resizeObserver:ResizeObserver
   private cleanups:(()=>void)[]=[]
 
@@ -326,9 +347,18 @@ export class SpaceRenderer {
     if(this.canvas.width!==w||this.canvas.height!==h){this.canvas.width=w;this.canvas.height=h}
     gl.viewport(0,0,w,h)
   }
+  /** Proyección afín SOLO de dibujo: impide clipping en misiones interplanetarias.
+   * Reconstruye ICRF con basis_icrf antes de comprimir y centrar, sin modificar posiciones ni tiempos. */
+  private sceneFrom(v:readonly number[], basis?:readonly (readonly number[])[]):Vector3 {
+    return vMul(vSub(toScene(v,basis),this.center),this.worldScale)
+  }
+  private sceneVelocity(v:readonly number[],basis?:readonly (readonly number[])[]):Vector3 {
+    return vMul(toScene(v,basis),this.worldScale)
+  }
   setMission(transfer:TransferResponse|null,color:string,visible:boolean) {
     const changed=transfer!==this.transfer
     this.transfer=transfer;this.color=color;this.showRoute=visible
+    this.originId=transfer?.origin_id??'earth';this.destinationId=transfer?.destination_id??'moon'
     if(!changed)return
     const gl=this.gl
     if(this.route)gl.deleteBuffer(this.route.buffer)
@@ -336,16 +366,20 @@ export class SpaceRenderer {
     if(this.moonTrack)gl.deleteBuffer(this.moonTrack.buffer)
     this.route=this.earthTrack=this.moonTrack=null
     this.minDistances={earth:Infinity,moon:Infinity}
+    this.center=[0,0,0];this.worldScale=1
     if(transfer && transfer.samples.length>=2){
-      const samples=transfer.samples,basis=transfer.basis_icrf
-      const earth=samples.map(s=>toScene(s.body_positions_m.earth,basis))
-      const moon=samples.map(s=>toScene(s.body_positions_m.moon,basis))
+      const basis=transfer.basis_icrf
+      const fit=createSpaceFit(transfer.samples,basis,this.originId,this.destinationId)
+      this.center=fit.center;this.worldScale=fit.scale
+      const samples=transfer.samples
+      const earth=samples.map(s=>this.sceneFrom(s.body_positions_m[this.originId],basis))
+      const moon=samples.map(s=>this.sceneFrom(s.body_positions_m[this.destinationId],basis))
       this.earthTrack=createTrack(gl,earth);this.moonTrack=createTrack(gl,moon)
       const pts:Vector3[]=[],ts:number[]=[]
       for(let i=0;i<samples.length-1;i++){
         const a=samples[i],b=samples[i+1],duration=b.t_s-a.t_s
-        const pa=toScene(a.position_m,basis),pb=toScene(b.position_m,basis)
-        const va=toScene(a.velocity_m_s,basis),vb=toScene(b.velocity_m_s,basis)
+        const pa=this.sceneFrom(a.position_m,basis),pb=this.sceneFrom(b.position_m,basis)
+        const va=this.sceneVelocity(a.velocity_m_s,basis),vb=this.sceneVelocity(b.velocity_m_s,basis)
         // 6 subdivisiones para mostrar arcos suaves, sin volver a integrar física.
         for(let j=0;j<6;j++){
           const t=j/6
@@ -360,29 +394,29 @@ export class SpaceRenderer {
           ts.push(a.t_s+duration*t)
         }
       }
-      const last=toScene(samples[samples.length-1].position_m,basis)
+      const last=this.sceneFrom(samples[samples.length-1].position_m,basis)
       pts.push(last)
       this.minDistances.earth=Math.min(this.minDistances.earth,vLength(vSub(last,earth[earth.length-1])))
       this.minDistances.moon=Math.min(this.minDistances.moon,vLength(vSub(last,moon[moon.length-1])))
       ts.push(samples[samples.length-1].t_s)
       this.route={...createTrack(gl,pts),times:new Float64Array(ts)}
       this.frameHome([...earth,...moon,...pts])
-    }else if(this.preview){this.frameHome([toScene(this.preview.body_positions_m.earth),toScene(this.preview.body_positions_m.moon)])}
+    }else if(this.preview){this.frameHome([this.sceneFrom(this.preview.body_positions_m.earth),this.sceneFrom(this.preview.body_positions_m.moon)])}
   }
   setPreview(data:EarthMoonEphemeris|null) {
     this.preview=data
-    if(!this.transfer&&data)this.frameHome([toScene(data.body_positions_m.earth),toScene(data.body_positions_m.moon)])
+    if(!this.transfer&&data)this.frameHome([this.sceneFrom(data.body_positions_m.earth),this.sceneFrom(data.body_positions_m.moon)])
   }
   setFrame(state:TransferState|null,date:Date,sun:SunDirectionEphemeris|null){this.current=state;this.date=date;this.sun=sun}
   setEnhanced(value:boolean){this.enhanced=value}
   setTracks(value:boolean){this.tracksEnabled=value}
-  zoom(factor:number){this.camera.distance=Math.max(.85,Math.min(1000,this.camera.distance*factor))}
+  zoom(factor:number){this.camera.distance=Math.max(.035,Math.min(1600,this.camera.distance*factor))}
   focusOn(value:Focus){
     if(value==='system'){this.focus='system';this.camera.target=[...this.home.target];this.camera.distance=this.home.distance;this.camera.yaw=-.55;this.camera.pitch=.36;return}
     const target=this.lastPosition[value]
     if(!target)return
     this.focus=value;this.camera.target=[...target]
-    this.camera.distance=value==='earth'?9:value==='moon'?5.5:4.5
+    this.camera.distance=value==='earth'?Math.max(2.4,this.bodyRadii().earth*5):value==='moon'?Math.max(2.4,this.bodyRadii().moon*5):Math.max(1.5,this.bodyRadii().moon*4)
   }
   private frameHome(points:Vector3[]) {
     if(!points.length)return
@@ -390,7 +424,7 @@ export class SpaceRenderer {
     const target:Vector3=[(Math.min(...x)+Math.max(...x))/2,(Math.min(...y)+Math.max(...y))/2,(Math.min(...z)+Math.max(...z))/2]
     let radius=0
     for(const p of points)radius=Math.max(radius,vLength(vSub(p,target)))
-    const distance=Math.max(26,Math.min(950,radius*2.85+5))
+    const distance=Math.max(14,Math.min(1100,radius*2.75+5))
     this.home={target,distance}
     this.focusOn('system')
   }
@@ -432,11 +466,18 @@ export class SpaceRenderer {
     gl.drawArrays(mode,start,count??track.count)
   }
   private bodyRadii() {
-    const earthPhysical=(this.transfer?.bodies.earth.radius_m??6371000)/10000000
-    const moonPhysical=(this.transfer?.bodies.moon.radius_m??1737400)/10000000
+    const earthPhysical=(this.transfer?.bodies[this.originId]?.radius_m??6371000)/10000000*this.worldScale
+    const moonPhysical=(this.transfer?.bodies[this.destinationId]?.radius_m??1737400)/10000000*this.worldScale
+    // Escala ampliada para misiones interplanetarias, pero se retrae al acercarse
+    // la nave. La posición del centro permanece exacta en la proyección afín.
+    const earthBase=this.enhanced?Math.max(earthPhysical*2.65, Math.min(.88, .88*this.worldScale**.14)):earthPhysical
+    const moonBase=this.enhanced?Math.max(moonPhysical*5.3, Math.min(.75, .75*this.worldScale**.14)):moonPhysical
+    const ship=this.lastPosition.ship
+    const dEarth=ship&&this.lastPosition.earth?vLength(vSub(ship,this.lastPosition.earth)):Infinity
+    const dMoon=ship&&this.lastPosition.moon?vLength(vSub(ship,this.lastPosition.moon)):Infinity
     return {
-      earth:capBodyRadius(earthPhysical,this.enhanced?2.65:1,this.minDistances.earth),
-      moon:capBodyRadius(moonPhysical,this.enhanced?5.3:1,this.minDistances.moon),
+      earth:capBodyRadius(earthPhysical,earthBase/Math.max(earthPhysical,1e-30),dEarth),
+      moon:capBodyRadius(moonPhysical,moonBase/Math.max(moonPhysical,1e-30),dMoon),
     }
   }
   private updateSunArrow() {
@@ -479,9 +520,9 @@ export class SpaceRenderer {
   private render=()=>{
     const gl=this.gl
     if(!this.canvas.width||!this.canvas.height)return
-    const earth=this.transfer ? (this.current ? toScene(this.current.earth_m,this.transfer.basis_icrf) : null) : this.preview ? toScene(this.preview.body_positions_m.earth) : null
-    const moon=this.transfer ? (this.current ? toScene(this.current.moon_m,this.transfer.basis_icrf) : null) : this.preview ? toScene(this.preview.body_positions_m.moon) : null
-    const ship=this.current&&this.transfer?toScene(this.current.position_m,this.transfer.basis_icrf):null
+    const earth=this.transfer ? (this.current ? this.sceneFrom(this.current.earth_m,this.transfer.basis_icrf) : null) : this.preview ? this.sceneFrom(this.preview.body_positions_m.earth) : null
+    const moon=this.transfer ? (this.current ? this.sceneFrom(this.current.moon_m,this.transfer.basis_icrf) : null) : this.preview ? this.sceneFrom(this.preview.body_positions_m.moon) : null
+    const ship=this.current&&this.transfer?this.sceneFrom(this.current.position_m,this.transfer.basis_icrf):null
     this.lastPosition={earth,moon,ship}
     if(this.focus!=='system'&&this.lastPosition[this.focus])this.camera.target=[...this.lastPosition[this.focus]!]
     const {yaw,pitch,distance,target}=this.camera
@@ -513,7 +554,7 @@ export class SpaceRenderer {
       gl.disable(gl.BLEND)
     }
     const {earth:earthRadius,moon:moonRadius}=this.bodyRadii()
-    if(this.sun) {
+    if(this.sun && this.originId!=='sun' && this.destinationId!=='sun') {
       // Esfera lejana en dirección JPL, no una posición real del Sol a esta escala.
       // Si la cámara mira al otro lado, la flecha de la interfaz sigue orientando.
       const dir=vNormalize(directionToScene(this.sun.direction_icrf))
@@ -527,20 +568,23 @@ export class SpaceRenderer {
     this.updateSunArrow()
     if(earth){
       const rotation=(this.date.getTime()/86164000%1)*Math.PI*2
-      this.drawMesh(this.globe,model(earth,earthRadius,rotation),[1,1,1],0)
-      gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE)
-      gl.depthMask(false)
-      this.drawMesh(this.globe,model(earth,earthRadius*1.10),[.1,.5,.95],3,.33)
-      gl.depthMask(true);gl.disable(gl.BLEND)
+      const material=bodyMaterial(this.originId)
+      this.drawMesh(this.globe,model(earth,earthRadius,rotation),material.color,material.kind)
+      if(this.originId==='earth'){
+        gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE)
+        gl.depthMask(false)
+        this.drawMesh(this.globe,model(earth,earthRadius*1.10),[.1,.5,.95],3,.33)
+        gl.depthMask(true);gl.disable(gl.BLEND)
+      }
     }
-    if(moon){this.drawMesh(this.globe,model(moon,moonRadius),[1,1,1],1)}
+    if(moon){const material=bodyMaterial(this.destinationId);this.drawMesh(this.globe,model(moon,moonRadius),material.color,material.kind)}
     if(ship&&this.showRoute&&this.current&&this.transfer){
-      const speed=toScene(this.current.velocity_m_s,this.transfer.basis_icrf)
+      const speed=this.sceneVelocity(this.current.velocity_m_s,this.transfer.basis_icrf)
       // Mantener el centro exacto y limitar el volumen de la malla para que no
       // se meta visualmente dentro de la Luna/Tierra al aproximarse.
       const gapMoon=moon?vLength(vSub(ship,moon))-moonRadius:Infinity
       const gapEarth=earth?vLength(vSub(ship,earth))-earthRadius:Infinity
-      const shipScale=shipScaleForClearance(Math.min(gapMoon,gapEarth),.115)
+      const shipScale=shipScaleForClearance(Math.min(gapMoon,gapEarth),Math.min(.115,Math.max(.018,.115*this.worldScale**.25)))
       if(shipScale>0){
         const shipM=rocketModel(ship,speed,shipScale)
         this.drawMesh(this.rocket[0],shipM,[.88,.94,1.0],2)
@@ -571,5 +615,174 @@ export class SpaceRenderer {
     for(const m of [this.globe,...this.rocket]){gl.deleteBuffer(m.vertices);gl.deleteBuffer(m.indices)}
     gl.deleteProgram(this.meshProgram);gl.deleteProgram(this.dotProgram)
     for(const label of Object.values(this.labels))if(label)label.style.display='none'
+  }
+}
+/** Explorador 3D del sistema solar. Coordenadas JPL ICRF; distancias heliocéntricas
+ * comprimidas solo para poder seleccionar todos los cuerpos en la misma pantalla.
+ * No son órbitas simuladas ni posiciones ficticias. */
+export class SolarSpaceRenderer {
+  private gl:WebGLRenderingContext
+  private shader:WebGLProgram
+  private dots:WebGLProgram
+  private globe:Mesh
+  private stars:Track
+  private guide:Track|null=null
+  private resizeObserver:ResizeObserver
+  private raf=0
+  private active=true
+  private camera={yaw:-.62,pitch:.42,distance:167,target:[0,0,0] as Vector3}
+  private vp:Mat4=new Float32Array(16)
+  private eye:Vector3=[0,0,167]
+  private date=new Date()
+  private positions:Record<string,Vector3>={}
+  private pointer:{x:number;y:number;button:number;target:Vector3}|null=null
+  private cleanups:(()=>void)[]=[]
+  private bodies:Record<string,{kind:number;color:Vector3;radius:number}> = {
+    sun:{kind:4,color:[1,.7,.3],radius:4},
+    mercury:{kind:6,color:[.7,.7,.68],radius:.6},
+    venus:{kind:6,color:[.93,.75,.5],radius:1.1},
+    earth:{kind:0,color:[.9,1,1],radius:1.3},
+    moon:{kind:1,color:[.75,.79,.84],radius:.66},
+    mars:{kind:6,color:[.95,.36,.20],radius:1},
+    jupiter:{kind:6,color:[.82,.61,.47],radius:2.3},
+    saturn:{kind:6,color:[.9,.79,.59],radius:2},
+    uranus:{kind:6,color:[.51,.9,.92],radius:1.35},
+    neptune:{kind:6,color:[.35,.5,.94],radius:1.3},
+  }
+  constructor(private canvas:HTMLCanvasElement, private labels:Record<string,HTMLElement|null>){
+    const gl=canvas.getContext('webgl',{antialias:true,alpha:false,powerPreference:'high-performance'})
+    if(!gl)throw new Error('WebGL no disponible en el navegador. Puedes usar la vista 2D.')
+    this.gl=gl;this.shader=program(gl,VERTEX_SHADER,FRAGMENT_SHADER)
+    this.dots=program(gl,DOT_VERTEX,DOT_FRAGMENT)
+    this.globe=sphere(gl);this.stars=createStars(gl)
+    gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL)
+    this.resizeObserver=new ResizeObserver(()=>this.resize());this.resizeObserver.observe(canvas)
+    const on=(name:string,cb:EventListener,opts?:AddEventListenerOptions)=>{
+      canvas.addEventListener(name,cb,opts);this.cleanups.push(()=>canvas.removeEventListener(name,cb,opts))
+    }
+    on('pointerdown',((e:PointerEvent)=>{
+      if(e.button!==0&&e.button!==2)return
+      this.pointer={x:e.clientX,y:e.clientY,button:e.button,target:[...this.camera.target]}
+      canvas.setPointerCapture(e.pointerId)
+    }) as EventListener)
+    on('pointermove',((e:PointerEvent)=>{
+      const drag=this.pointer;if(!drag)return
+      const dx=e.clientX-drag.x,dy=e.clientY-drag.y
+      if(drag.button===0){
+        this.camera.yaw-=dx*.007;this.camera.pitch=Math.max(-1.4,Math.min(1.4,this.camera.pitch-dy*.007))
+        drag.x=e.clientX;drag.y=e.clientY
+      }else{
+        const {yaw,pitch,distance}=this.camera
+        const right:Vector3=[Math.cos(yaw),0,-Math.sin(yaw)]
+        const up:Vector3=[-Math.sin(pitch)*Math.sin(yaw),Math.cos(pitch),-Math.sin(pitch)*Math.cos(yaw)]
+        const factor=distance*.0016
+        this.camera.target=vAdd(drag.target,vAdd(vMul(right,-dx*factor),vMul(up,dy*factor)))
+      }
+    }) as EventListener)
+    const done=()=>{this.pointer=null}
+    on('pointerup',done as EventListener);on('pointercancel',done as EventListener)
+    on('lostpointercapture',done as EventListener)
+    on('wheel',((e:WheelEvent)=>{e.preventDefault();this.zoom(Math.exp(Math.sign(e.deltaY)*.14))}) as EventListener,{passive:false})
+    on('contextmenu',((e:MouseEvent)=>e.preventDefault()) as EventListener)
+    this.resize();this.frame()
+  }
+  /** 1 AU=14959.8 unidades originales: compresión radial creciente y monótona. */
+  static position(relativeICRF:Vector3):Vector3 {
+    const radius=vLength(relativeICRF),rAU=radius/14959.78707
+    return radius>1e-10?vMul(relativeICRF,(22*Math.log1p(2*rAU))/radius):[0,0,0]
+  }
+  setBodies(bodies:Record<string,readonly number[]>|null,date:Date){
+    this.date=date
+    if(!bodies?.sun){this.positions={};return}
+    const sun=toScene(bodies.sun)
+    const positions:Record<string,Vector3>={}
+    for(const [id,v] of Object.entries(bodies)) {
+      if(!this.bodies[id])continue
+      positions[id]=SolarSpaceRenderer.position(vSub(toScene(v),sun))
+    }
+    // Desplazamiento SOLO visual: el sistema solar comprimido oculta el satélite.
+    if(positions.earth && bodies.earth && bodies.moon){
+      const moonDirection=vNormalize(vSub(toScene(bodies.moon),toScene(bodies.earth)))
+      positions.moon=vAdd(positions.earth,vMul(moonDirection,2.7))
+    }
+    this.positions=positions
+    // Líneas a los centros celestes, ilustrativas, no recorridos o predicciones.
+    if(this.guide)this.gl.deleteBuffer(this.guide.buffer)
+    const points:Vector3[]=[]
+    for(const [id,p] of Object.entries(positions)) if(id!=='sun')points.push([0,0,0],p)
+    this.guide=points.length?createTrack(this.gl,points):null
+  }
+  zoom(factor:number){this.camera.distance=Math.max(4,Math.min(1000,this.camera.distance*factor))}
+  home(){this.camera={yaw:-.62,pitch:.42,distance:167,target:[0,0,0]}}
+  focus(id:string){const p=this.positions[id];if(p){this.camera.target=[...p];this.camera.distance=id==='sun'?20:14}}
+  private resize(){const rect=this.canvas.getBoundingClientRect();if(!rect.width||!rect.height)return
+    const pixel=Math.min(window.devicePixelRatio||1,1.75),limit=Math.min(1,1900/Math.max(rect.width*pixel,rect.height*pixel))
+    const w=Math.round(rect.width*pixel*limit),h=Math.round(rect.height*pixel*limit)
+    if(this.canvas.width!==w||this.canvas.height!==h){this.canvas.width=w;this.canvas.height=h}
+    this.gl.viewport(0,0,w,h)
+  }
+  private drawMesh(position:Vector3,radius:number,color:Vector3,kind:number){
+    const gl=this.gl,p=this.shader
+    gl.useProgram(p);gl.bindBuffer(gl.ARRAY_BUFFER,this.globe.vertices)
+    const pos=gl.getAttribLocation(p,'aPosition'),norm=gl.getAttribLocation(p,'aNormal')
+    gl.enableVertexAttribArray(pos);gl.enableVertexAttribArray(norm)
+    gl.vertexAttribPointer(pos,3,gl.FLOAT,false,24,0);gl.vertexAttribPointer(norm,3,gl.FLOAT,false,24,12)
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,this.globe.indices)
+    gl.uniformMatrix4fv(gl.getUniformLocation(p,'uVP'),false,this.vp)
+    gl.uniformMatrix4fv(gl.getUniformLocation(p,'uModel'),false,model(position,radius))
+    gl.uniform3fv(gl.getUniformLocation(p,'uCamera'),this.eye)
+    const light=vNormalize(vMul(position,-1))
+    gl.uniform3fv(gl.getUniformLocation(p,'uSun'),kind===4?[.8,.4,.6]:light)
+    gl.uniform3fv(gl.getUniformLocation(p,'uColor'),color)
+    gl.uniform1f(gl.getUniformLocation(p,'uKind'),kind)
+    gl.uniform1f(gl.getUniformLocation(p,'uAlpha'),1)
+    gl.uniform1f(gl.getUniformLocation(p,'uTime'),this.date.getTime()/1000)
+    gl.drawElements(gl.TRIANGLES,this.globe.length,gl.UNSIGNED_SHORT,0)
+  }
+  private drawDots(t:Track,rgb:Vector3,alpha:number,size:number,mode:number){
+    const gl=this.gl,p=this.dots;gl.useProgram(p)
+    const attr=gl.getAttribLocation(p,'aPosition')
+    gl.bindBuffer(gl.ARRAY_BUFFER,t.buffer);gl.enableVertexAttribArray(attr)
+    gl.vertexAttribPointer(attr,3,gl.FLOAT,false,0,0)
+    gl.uniformMatrix4fv(gl.getUniformLocation(p,'uVP'),false,this.vp)
+    gl.uniform3fv(gl.getUniformLocation(p,'uColor'),rgb)
+    gl.uniform1f(gl.getUniformLocation(p,'uAlpha'),alpha)
+    gl.uniform1f(gl.getUniformLocation(p,'uSize'),size)
+    gl.uniform1f(gl.getUniformLocation(p,'uPoints'),mode===gl.POINTS?1:0)
+    gl.drawArrays(mode,0,t.count)
+  }
+  private frame=()=>{if(!this.active)return
+    if(!document.hidden)this.render()
+    this.raf=requestAnimationFrame(this.frame)
+  }
+  private render(){const gl=this.gl;if(!this.canvas.height)return
+    const {yaw,pitch,distance,target}=this.camera
+    const offset:Vector3=[distance*Math.cos(pitch)*Math.sin(yaw),distance*Math.sin(pitch),distance*Math.cos(pitch)*Math.cos(yaw)]
+    this.eye=vAdd(target,offset)
+    this.vp=multiply(perspective(this.canvas.width/this.canvas.height),lookAt(this.eye,target))
+    gl.clearColor(.008,.017,.039,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT)
+    gl.disable(gl.DEPTH_TEST);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE)
+    this.drawDots(this.stars,[.63,.77,1],.64,1.9,gl.POINTS)
+    if(this.guide){gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);this.drawDots(this.guide,[.36,.55,.76],.22,1,gl.LINES)}
+    gl.disable(gl.BLEND);gl.enable(gl.DEPTH_TEST)
+    for(const [id,p] of Object.entries(this.positions)){
+      const b=this.bodies[id];this.drawMesh(p,b.radius,b.color,b.kind)
+      const el=this.labels[id];if(!el)continue
+      const m=this.vp
+      const x=m[0]*p[0]+m[4]*p[1]+m[8]*p[2]+m[12]
+      const y=m[1]*p[0]+m[5]*p[1]+m[9]*p[2]+m[13]
+      const z=m[2]*p[0]+m[6]*p[1]+m[10]*p[2]+m[14]
+      const w=m[3]*p[0]+m[7]*p[1]+m[11]*p[2]+m[15]
+      const px=(x/w*.5+.5)*this.canvas.clientWidth,py=(-y/w*.5+.5)*this.canvas.clientHeight
+      const visible=w>0&&z/w<1&&px>=0&&px<=this.canvas.clientWidth&&py>=0&&py<=this.canvas.clientHeight
+      el.style.display=visible?'block':'none';if(visible){el.style.left=`${px}px`;el.style.top=`${py+24}px`}
+    }
+    for(const [id,el] of Object.entries(this.labels))if(el&&!this.positions[id])el.style.display='none'
+  }
+  dispose(){this.active=false;cancelAnimationFrame(this.raf);this.resizeObserver.disconnect()
+    for(const clean of this.cleanups)clean()
+    const gl=this.gl;gl.deleteBuffer(this.stars.buffer);if(this.guide)gl.deleteBuffer(this.guide.buffer)
+    gl.deleteBuffer(this.globe.vertices);gl.deleteBuffer(this.globe.indices)
+    gl.deleteProgram(this.shader);gl.deleteProgram(this.dots)
   }
 }
