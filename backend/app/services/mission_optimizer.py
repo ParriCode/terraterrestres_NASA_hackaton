@@ -867,19 +867,27 @@ def optimize_round_trip_transfer(
 
         for t_out in out_durations:
             m_pos_1 = np.asarray(moon.pos(t_out), dtype=np.float64)
-            m_vel_1 = np.asarray(moon.speed(t_out), dtype=np.float64)
             e_pos_1 = np.asarray(earth.pos(t_out), dtype=np.float64)
-            u_m_vel = m_vel_1 / np.linalg.norm(m_vel_1)
+            u_far_side = (m_pos_1 - e_pos_1) / np.linalg.norm(m_pos_1 - e_pos_1)
 
-            target_peri = m_pos_1 + r_p_moon * u_m_vel
-            seed_aim = m_pos_1 + 5_500_000.0 * u_m_vel
+            # Aproximación por la cara exterior de la Luna.
+            target_peri = m_pos_1 + r_p_moon * u_far_side
+            seed_aim = m_pos_1 + 5_500_000.0 * u_far_side
 
-            ranked_seeds: list[tuple[float, np.ndarray, np.ndarray, np.ndarray]] = []
-            for alpha in _aligned_launch_angles(earth, moon, t_out, (6.0, 13.0, 20.0, 27.0, 34.0)):
-                r0, v_park = _parking_state_3d(earth, moon, alpha, parking_alt_m)
+            ranked_seeds: list[
+                tuple[float, np.ndarray, np.ndarray, np.ndarray]
+            ] = []
+
+            for alpha in _aligned_launch_angles(
+                earth, moon, t_out, (6.0, 13.0, 20.0, 27.0, 34.0)
+            ):
+                r0, v_park = _parking_state_3d(
+                    earth, moon, alpha, parking_alt_m
+                )
                 rel_r1 = r0 - e_pos_0
                 rel_r2 = seed_aim - e_pos_1
                 p_norm = _lambert_plane_normal(rel_r1, rel_r2, u_h_0)
+
                 try:
                     seed = solve_lambert(
                         tuple(rel_r1),
@@ -891,14 +899,30 @@ def optimize_round_trip_transfer(
                     )
                 except (LambertError, ValueError, ArithmeticError):
                     continue
-                v_guess = e_vel_0 + np.asarray(seed.departure_velocity_m_s, dtype=np.float64)
-                ranked_seeds.append((float(np.linalg.norm(v_guess - v_park)), r0, v_park, v_guess))
+
+                v_guess = e_vel_0 + np.asarray(
+                    seed.departure_velocity_m_s, dtype=np.float64
+                )
+                ranked_seeds.append(
+                    (
+                        float(np.linalg.norm(v_guess - v_park)),
+                        r0,
+                        v_park,
+                        v_guess,
+                    )
+                )
 
             ranked_seeds.sort(key=lambda item: item[0])
 
             for _, r0, v_park, v_guess in ranked_seeds[:2]:
                 ok_out, v0_base, _ = _shoot_3d_target(
-                    bodies, r0, v_guess, 0.0, t_out, lambda _t, p=target_peri: p, tol_m=30_000.0
+                    bodies,
+                    r0,
+                    v_guess,
+                    0.0,
+                    t_out,
+                    lambda _t, p=target_peri: p,
+                    tol_m=30_000.0,
                 )
                 if not ok_out:
                     reasons.append("No convergió la aproximación al perilunio")
@@ -908,32 +932,67 @@ def optimize_round_trip_transfer(
                 u_r0 = (r0 - e_pos_0) / np.linalg.norm(r0 - e_pos_0)
 
                 def _fr_two_param(params: np.ndarray) -> np.ndarray:
-                    v_try = v0_base + (params[0] * 10.0) * u_t0 + (params[1] * 10.0) * u_r0
+                    v_try = (
+                        v0_base
+                        + (params[0] * 10.0) * u_t0
+                        + (params[1] * 10.0) * u_r0
+                    )
                     sol = _propagate_3d(
                         bodies,
                         np.concatenate((r0, v_try)),
                         0.0,
                         max_total_duration_s,
-                        rtol=1e-7,
-                        atol=1e-7,
+                        rtol=1e-10,
+                        atol=1e-9,
                         dense_output=True,
                         strict_impact=False,
                     )
                     if not sol.success:
                         return np.array([1e5, 1e5])
+
                     min_m_alt, t_pm = _min_body_altitude(
-                        sol, moon, 0.5 * t_out, min(max_total_duration_s, 1.5 * t_out), n=160, refine=False
+                        sol,
+                        moon,
+                        0.5 * t_out,
+                        min(max_total_duration_s, 1.5 * t_out),
+                        n=160,
+                        refine=True,
                     )
-                    # Penalización adicional si la trayectoria penetra por debajo de 25 km
+
+                    # Penalización si la trayectoria baja de 25 km.
                     penetration = max(0.0, 25_000.0 - min_m_alt) / 10_000.0
-                    t_ret_start = min(max_total_duration_s - 3600.0, t_pm + 0.75 * 86400.0)
-                    min_e_alt, _ = _min_body_altitude(
-                        sol, earth, t_ret_start, max_total_duration_s, n=240, refine=False
+                    t_ret_start = min(
+                        max_total_duration_s - 3600.0,
+                        t_pm + 0.75 * 86400.0,
                     )
+                    min_e_alt, _ = _min_body_altitude(
+                        sol,
+                        earth,
+                        t_ret_start,
+                        max_total_duration_s,
+                        n=240,
+                        refine=True,
+                    )
+
                     return np.array(
                         [
-                            (min_m_alt - lunar_periapsis_alt_m) / 50_000.0 - penetration,
+                            (min_m_alt - lunar_periapsis_alt_m) / 50_000.0
+                            - penetration,
                             (min_e_alt - target_return_perigee_m) / 200_000.0,
+                        ]
+                    )
+
+                def _fr_jac(params: np.ndarray) -> np.ndarray:
+                    # Paso absoluto para evitar diferencias demasiado pequeñas.
+                    step = 1e-3
+                    return np.column_stack(
+                        [
+                            (
+                                _fr_two_param(params + step * np.eye(2)[i])
+                                - _fr_two_param(params - step * np.eye(2)[i])
+                            )
+                            / (2 * step)
+                            for i in range(2)
                         ]
                     )
 
@@ -941,14 +1000,18 @@ def optimize_round_trip_transfer(
                     _fr_two_param,
                     np.zeros(2, dtype=np.float64),
                     method="trf",
-                    bounds=([-8.0, -8.0], [8.0, 8.0]),
-                    diff_step=2e-3,
+                    bounds=([-25.0, -100.0], [25.0, 100.0]),
+                    jac=_fr_jac,
                     ftol=1e-5,
                     xtol=1e-5,
                     gtol=1e-5,
-                    max_nfev=20,
+                    max_nfev=60,
                 )
-                v0_opt = v0_base + (fit.x[0] * 10.0) * u_t0 + (fit.x[1] * 10.0) * u_r0
+                v0_opt = (
+                    v0_base
+                    + (fit.x[0] * 10.0) * u_t0
+                    + (fit.x[1] * 10.0) * u_r0
+                )
 
                 sol_full = _propagate_3d(
                     bodies,
@@ -969,23 +1032,44 @@ def optimize_round_trip_transfer(
                     and len(sol_full.t_events[2]) > 0
                 )
                 t_eval_end = float(sol_full.t[-1])
-                if not hit_reentry or t_eval_end <= t_out + 1.5 * 86400.0:
-                    reasons.append("La trayectoria de retorno libre no completó la reentrada segura")
+
+                if (
+                    not sol_full.success
+                    or not hit_reentry
+                    or t_eval_end <= t_out + 1.5 * 86400.0
+                ):
+                    reasons.append(
+                        "La trayectoria de retorno libre no completó "
+                        "la reentrada segura"
+                    )
                     continue
 
                 t_reentry = float(sol_full.t_events[2][0])
                 min_m_alt, t_peri_m = _min_body_altitude(
-                    sol_full, moon, 0.5 * t_out, min(t_reentry, 1.5 * t_out)
+                    sol_full,
+                    moon,
+                    0.5 * t_out,
+                    min(t_reentry, 1.5 * t_out),
                 )
-                if min_m_alt < 20_000.0 or abs(min_m_alt - lunar_periapsis_alt_m) > 80_000.0:
-                    reasons.append(f"Perilunio fuera de seguridad ({min_m_alt / 1000:.1f} km)")
+
+                if (
+                    min_m_alt < 20_000.0
+                    or abs(min_m_alt - lunar_periapsis_alt_m) > 80_000.0
+                ):
+                    reasons.append(
+                        f"Perilunio fuera de seguridad ({min_m_alt / 1000:.1f} km)"
+                    )
                     continue
 
                 tli_dv = float(np.linalg.norm(v0_opt - v_park))
                 actual_reentry_alt = float(
-                    np.linalg.norm(sol_full.sol(t_reentry)[:3] - np.asarray(earth.pos(t_reentry)))
+                    np.linalg.norm(
+                        sol_full.sol(t_reentry)[:3]
+                        - np.asarray(earth.pos(t_reentry))
+                    )
                     - earth.radius_m
                 )
+
                 cand_rt = RoundTripResult(
                     scenario=scenario,
                     mode="free_return",
@@ -1002,8 +1086,13 @@ def optimize_round_trip_transfer(
                     mass_kg=float(mass_kg),
                     _segments=((0.0, float(t_reentry), sol_full),),
                 )
-                if best_rt is None or cand_rt.total_delta_v_m_s < best_rt.total_delta_v_m_s:
+
+                if (
+                    best_rt is None
+                    or cand_rt.total_delta_v_m_s < best_rt.total_delta_v_m_s
+                ):
                     best_rt = cand_rt
+
             if best_rt is not None:
                 break
 
