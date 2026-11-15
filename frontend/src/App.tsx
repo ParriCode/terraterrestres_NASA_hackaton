@@ -7,6 +7,8 @@ import SolarSystemView from './components/SolarSystemView'
 import TransferForm from './components/TransferForm'
 import TransferSummary from './components/TransferSummary'
 import TransferView from './components/TransferView'
+import SolarSystemView3D from './components/SolarSystemView3D'
+import type { ViewMode } from './components/TransferView'
 import type { TransferRequest, TransferResponse } from './types/transfer'
 import { formatDuration, formatUtc, stateAt } from './utils/transfer'
 
@@ -29,6 +31,15 @@ export default function App() {
   const [speed, setSpeed] = useState(21600)
   const controller = useRef<AbortController | null>(null)
   const [previewDate, setPreviewDate] = useState(() => new Date())
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    try { return window.localStorage.getItem('orbital4b-view-mode') === '2d' ? '2d' : '3d' }
+    catch { return '3d' }
+  })
+  function changeView(mode: ViewMode) {
+    setViewMode(mode)
+    try { window.localStorage.setItem('orbital4b-view-mode', mode) } catch { /* navegación privada */ }
+  }
+
 
   const selected = journeys.find(j => j.id === selectedId) ?? null
   const transfer = selected?.response ?? null
@@ -109,15 +120,24 @@ export default function App() {
     </header>
     <main className="stage">
       {scene === 'solar'
-        ? <SolarSystemView date={sceneDate} transfer={transfer} state={state}
-            visible={selected?.visible ?? false} color={selected?.color} onEarth={() => setScene('earth')} />
+        ? (viewMode === '3d'
+          ? <SolarSystemView3D date={sceneDate} transfer={transfer} state={state}
+              visible={selected?.visible ?? false} color={selected?.color} onEarth={() => setScene('earth')} />
+          : <SolarSystemView date={sceneDate} transfer={transfer} state={state}
+              visible={selected?.visible ?? false} color={selected?.color} onEarth={() => setScene('earth')} />)
         : <TransferView date={sceneDate} transfer={transfer} state={state} time={time}
-            visible={selected?.visible ?? false} color={selected?.color} />}
+            visible={selected?.visible ?? false} color={selected?.color} mode={viewMode} />}
       <div className="scene-nav" role="tablist" aria-label="Vista del mapa">
         <button type="button" role="tab" aria-selected={scene === 'solar'} className={scene === 'solar' ? 'scene-tab active' : 'scene-tab'}
           onClick={() => setScene('solar')}><Icon name="sun" size={14} />Sistema solar</button>
         <button type="button" role="tab" aria-selected={scene === 'earth'} className={scene === 'earth' ? 'scene-tab active' : 'scene-tab'}
           onClick={() => setScene('earth')}><Icon name="globe" size={14} />Tierra–Luna</button>
+      </div>
+      <div className="dimension-switch" role="group" aria-label="Cambiar visualización 2D y 3D">
+        <button type="button" className={viewMode === '2d' ? 'dimension-button active' : 'dimension-button'}
+          aria-pressed={viewMode === '2d'} onClick={() => changeView('2d')}>2D · Mapa</button>
+        <button type="button" className={viewMode === '3d' ? 'dimension-button active' : 'dimension-button'}
+          aria-pressed={viewMode === '3d'} onClick={() => changeView('3d')}>3D · Espacio</button>
       </div>
       {showForm && <div className="mission-panel panel-surface" aria-label="Configuración de transferencia">
         <button className="panel-close" type="button" onClick={() => setShowForm(false)} aria-label="Cerrar formulario"><Icon name="x" size={16} /></button>
