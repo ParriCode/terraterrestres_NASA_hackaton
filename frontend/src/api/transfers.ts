@@ -63,9 +63,11 @@ export async function requestTransfer(body: TransferRequest, signal?: AbortSigna
   if (body.objective === 'energia') return requestOptimizedOutbound(body, signal)
   const orbitalReturn = false
   const url = `${API_BASE_URL}${orbitalReturn ? '/transfers/lunar-orbit-return' : '/transfers/optimize'}`
-  const { mission_mode: _mode, orbit_altitude_km, lunar_revolutions, ...baseBody } = body
+  const { mission_mode: _mode, orbit_altitude_km, lunar_stay_s, ...baseBody } = body
   void _mode
-  const payload = orbitalReturn ? { ...baseBody, orbit_altitude_km, lunar_revolutions } : baseBody
+  void orbit_altitude_km
+  void lunar_stay_s
+  const payload = baseBody
   const timeout = AbortSignal.timeout(TIMEOUT_MS)
   let response: Response
   try {

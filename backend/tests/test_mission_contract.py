@@ -89,19 +89,18 @@ def test_mission_round_trip_bridge_validates_entry_and_schema(monkeypatch):
     assert data['samples'][-1]['t_s'] == 7 * 86400
 
 
-def test_mission_round_trip_rejects_unverified_revolutions(monkeypatch):
+def test_mission_round_trip_rejects_wrong_stay_duration(monkeypatch):
     rt = StubRT()
     rt.mode = 'lunar_orbit'
     rt.lunar_stay_s = 3600.0
     monkeypatch.setattr(mission_controller, 'optimize_round_trip_transfer', lambda *a, **k: rt)
-    resp = TestClient(create_app()).post('/missions/round-trip', json={
+    response = TestClient(create_app()).post('/missions/round-trip', json={
         'date': '2026-11-14T00:00:00Z', 'mode': 'lunar_orbit',
-        'max_total_duration_s': 12 * 86400, 'lunar_revolutions': 1,
+        'max_total_duration_s': 12 * 86400, 'lunar_stay_s': 6 * 3600,
     })
-    assert resp.status_code == 200
-    assert resp.json()['status'] == 'no_feasible_solution'
-    assert 'vueltas' in resp.json()['reasons'][0]
-
+    assert response.status_code == 200
+    assert response.json()['status'] == 'no_feasible_solution'
+    assert 'tiempo' in response.json()['reasons'][0].lower()
 
 def test_mission_round_trip_rejects_outbound_final_velocity(monkeypatch):
     class Outgoing(StubRT):
@@ -120,7 +119,8 @@ def test_mission_validation_rejects_bad_mode_and_missing_timezone():
     client = TestClient(create_app())
     for body in [
         {'date': '2026-11-14T00:00:00', 'mode': 'free_return'},
-        {'date': '2026-11-14T00:00:00Z', 'mode': 'free_return', 'lunar_revolutions': 1},
+        {'date': '2026-11-14T00:00:00Z', 'mode': 'free_return', 'lunar_stay_s': 3600},
+        {'date': '2026-11-14T00:00:00Z', 'mode': 'lunar_orbit', 'lunar_revolutions': 1},
         {'date': '2026-11-14T00:00:00Z', 'mode': 'not_a_mode'},
     ]:
         resp = client.post('/missions/round-trip', json=body)
@@ -144,25 +144,26 @@ def test_lunar_orbit_display_grid_samples_orbit_more_densely():
     assert np.count_nonzero((ts > 3 * 86400.0) & (ts < 3 * 86400.0 + 8_000.0)) >= 80
 
 
-def test_lunar_orbit_request_accepts_five_revolutions_and_validates_them(monkeypatch):
-    """La cantidad indicada se usa al programar la estancia y verificar las vueltas."""
+def test_lunar_orbit_request_uses_fixed_stay_and_computes_revolutions(monkeypatch):
+    """El usuario fija el tiempo; las vueltas son un resultado medido."""
     import math
 
     moon = StubRT.scenario.bodies['moon']
     radius = moon.radius_m + 150_000.0
-    period = 2 * math.pi * math.sqrt(radius ** 3 / moon.mu_m3_s2)
+    stay_s = 6 * 3600.0
+    simulated_revolutions = 2.5
     rt = StubRT()
     rt.mode = 'lunar_orbit'
     rt.outbound_duration_s = 3 * 86400.0
-    rt.lunar_stay_s = 5 * period
+    rt.lunar_stay_s = stay_s
     rt.total_duration_s = 7 * 86400.0
-    rt.inbound_duration_s = rt.total_duration_s - rt.outbound_duration_s - rt.lunar_stay_s
+    rt.inbound_duration_s = rt.total_duration_s - rt.outbound_duration_s - stay_s
     rt._segments = ((0, rt.total_duration_s, StubDenseSolution()),)
 
     def state(t):
-        if rt.outbound_duration_s <= t <= rt.outbound_duration_s + rt.lunar_stay_s:
-            phi = 5 * 2 * math.pi * (t - rt.outbound_duration_s) / rt.lunar_stay_s
-            omega = 5 * 2 * math.pi / rt.lunar_stay_s
+        if rt.outbound_duration_s <= t <= rt.outbound_duration_s + stay_s:
+            phi = simulated_revolutions * 2 * math.pi * (t - rt.outbound_duration_s) / stay_s
+            omega = simulated_revolutions * 2 * math.pi / stay_s
             return SimpleNamespace(
                 position_m=(384_400_000.0 + radius * math.cos(phi), radius * math.sin(phi), 0.0),
                 velocity_m_s=(-radius * omega * math.sin(phi), radius * omega * math.cos(phi), 0.0),
@@ -179,32 +180,38 @@ def test_lunar_orbit_request_accepts_five_revolutions_and_validates_them(monkeyp
         captured.update(kwargs)
         return rt
 
-    monkeypatch.setattr(mission_controller, 'load_bodies', lambda: {'moon': moon})
     monkeypatch.setattr(mission_controller, 'optimize_round_trip_transfer', fake_optimizer)
-    res = TestClient(create_app()).post('/missions/round-trip', json={
+    response = TestClient(create_app()).post('/missions/round-trip', json={
         'date': '2026-11-14T00:00:00Z', 'mode': 'lunar_orbit',
-        'max_total_duration_s': 12 * 86400, 'lunar_revolutions': 5,
+        'max_total_duration_s': 12 * 86400, 'lunar_stay_s': stay_s,
         'samples': 900,
     })
-    assert res.status_code == 200, res.text
-    data = res.json()
+    assert response.status_code == 200, response.text
+    data = response.json()
     assert data['status'] == 'ok', data
-    assert captured['lunar_stay_s'] == pytest.approx(5 * period)
-    assert data['actual_lunar_revolutions'] == pytest.approx(5, abs=0.03)
+    assert captured['lunar_stay_s'] == stay_s
+    assert data['lunar_stay_s'] == stay_s
+    assert data['actual_lunar_revolutions'] == pytest.approx(simulated_revolutions, abs=0.03)
     assert len(data['samples']) == 900
 
-
-def test_lunar_orbit_rejects_invalid_revolution_counts():
+def test_lunar_orbit_rejects_invalid_stay_times():
     client = TestClient(create_app())
-    for n in (0, 101, -3, 1.5, True):
+    for stay_s in (-1, 14 * 86400 + 1, 'not-a-number', None):
         response = client.post('/missions/round-trip', json={
             'date': '2026-11-14T00:00:00Z', 'mode': 'lunar_orbit',
-            'lunar_revolutions': n,
+            'lunar_stay_s': stay_s,
         })
-        assert response.status_code == 422, (n, response.text)
+        assert response.status_code == 422, (stay_s, response.text)
 
 
-def test_lunar_orbit_rejects_impossible_duration_before_solver(monkeypatch):
+def test_lunar_orbit_rejects_obsolete_revolution_input():
+    response = TestClient(create_app()).post('/missions/round-trip', json={
+        'date': '2026-11-14T00:00:00Z', 'mode': 'lunar_orbit',
+        'lunar_revolutions': 5,
+    })
+    assert response.status_code == 422
+
+def test_lunar_orbit_rejects_impossible_stay_before_solver(monkeypatch):
     called = False
 
     def fake_optimizer(*args, **kwargs):
@@ -215,12 +222,12 @@ def test_lunar_orbit_rejects_impossible_duration_before_solver(monkeypatch):
     monkeypatch.setattr(mission_controller, 'optimize_round_trip_transfer', fake_optimizer)
     response = TestClient(create_app()).post('/missions/round-trip', json={
         'date': '2026-11-14T00:00:00Z', 'mode': 'lunar_orbit',
-        'max_total_duration_s': 6 * 86400, 'lunar_revolutions': 100,
+        'max_total_duration_s': 6 * 86400, 'lunar_stay_s': 48 * 3600,
     })
     assert response.status_code == 200
     assert response.json()['status'] == 'no_feasible_solution'
+    assert '48.00 horas' in response.json()['reasons'][0]
     assert not called
-
 
 def test_lunar_orbit_dense_grid_supports_many_revolutions():
     from app.controllers.mission_controller import _time_grid
@@ -237,3 +244,30 @@ def test_lunar_orbit_dense_grid_supports_many_revolutions():
     assert len(ts) == 900
     assert np.all(np.diff(ts) > 0)
     assert np.count_nonzero((ts > rt.outbound_duration_s) & (ts < rt.outbound_duration_s + rt.lunar_stay_s)) >= 400
+
+
+def test_fixed_lunar_stay_ends_at_exact_requested_time(monkeypatch):
+    from app.services import mission_optimizer
+    calls = []
+    state0 = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+
+    def fake_propagation(bodies, y0, t0, t1, **kwargs):
+        calls.append((t0, t1, kwargs))
+        return SimpleNamespace(success=True, sol=lambda t: np.asarray(y0) + (t - t0))
+
+    monkeypatch.setattr(mission_optimizer, '_propagate_3d', fake_propagation)
+    segment, final_state = mission_optimizer._propagate_fixed_lunar_stay(
+        (), state0, insertion_time_s=3 * 86400.0, lunar_stay_s=6 * 3600.0,
+    )
+    assert segment.success
+    assert len(calls) == 1
+    assert calls[0][0] == 3 * 86400.0
+    assert calls[0][1] == 3 * 86400.0 + 6 * 3600.0
+    np.testing.assert_array_equal(final_state, state0 + 6 * 3600.0)
+
+    segment, final_state = mission_optimizer._propagate_fixed_lunar_stay(
+        (), state0, insertion_time_s=3 * 86400.0, lunar_stay_s=0.0,
+    )
+    assert segment is None
+    np.testing.assert_array_equal(final_state, state0)
+    assert len(calls) == 1

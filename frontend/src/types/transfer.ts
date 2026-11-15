@@ -7,7 +7,7 @@ export type TransferRequest = {
   date: string // ISO 8601 con zona horaria
   mission_mode?: MissionMode
   orbit_altitude_km?: number
-  lunar_revolutions?: number
+  lunar_stay_s?: number // tiempo fijo de estancia lunar, en segundos
   duration_s: number
   launch_angle_deg: number
   objective: TransferObjective
@@ -43,11 +43,9 @@ export type LunarManeuver = {
 
 export type LunarOrbitReport = {
   altitude_km: number
-  revolutions: number
   actual_revolutions: number
   orbit_insertion_t_s: number
   orbit_departure_t_s: number
-  orbital_period_s: number
   return_arrival_direction_deg: number | null
   return_arrival_t_s?: number
   verified_return: boolean

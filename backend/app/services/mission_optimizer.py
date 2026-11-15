@@ -662,6 +662,33 @@ def _propagate_3d(
     return solution
 
 
+def _propagate_fixed_lunar_stay(
+    bodies: tuple,
+    state_after_insertion: np.ndarray,
+    insertion_time_s: float,
+    lunar_stay_s: float,
+):
+    """Propaga la estancia orbital hasta el instante exacto indicado por el usuario."""
+    state = np.asarray(state_after_insertion, dtype=np.float64)
+    if lunar_stay_s == 0.0:
+        return None, state
+    departure_time_s = insertion_time_s + lunar_stay_s
+    solution = _propagate_3d(
+        bodies,
+        state,
+        insertion_time_s,
+        departure_time_s,
+        rtol=1e-8,
+        atol=1e-8,
+        dense_output=True,
+        strict_impact=True,
+        max_step=1800.0,
+    )
+    if not solution.success or solution.sol is None:
+        return solution, None
+    return solution, np.asarray(solution.sol(departure_time_s), dtype=np.float64)
+
+
 def _orbital_basis(earth, moon, t_s: float = 0.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Base ortonormal (u_em, u_perp, u_h) del plano instantáneo Tierra-Luna."""
     rel_m = np.asarray(moon.pos(t_s), dtype=np.float64) - np.asarray(earth.pos(t_s), dtype=np.float64)
@@ -726,7 +753,7 @@ def _shoot_3d_target(
     *,
     tol_m: float = 20_000.0,
 ) -> tuple[bool, np.ndarray, object]:
-    """Ajusta v0 en 3D con diff_step bien escalado para alcanzar target_pos_fn(t1)."""
+    """Ajusta v0 en 3D mediante un jacobiano numérico de paso absoluto."""
     target_r = np.asarray(target_pos_fn(t1), dtype=np.float64)
     scale = 100.0
 
@@ -746,16 +773,33 @@ def _shoot_3d_target(
             return np.full(3, 1e6)
         return (sol.y[:3, -1] - target_r) / 1000.0
 
+    def jac_fn(dv: np.ndarray) -> np.ndarray:
+        """Diferencias centradas con paso absoluto de velocidad (0,5 m/s).
+
+        diff_step de least_squares es relativo a cada componente de dv.
+        Cuando el vector inicial es cero puede usar perturbaciones minúsculas,
+        afectadas por el error numérico de la propagación orbital.
+        """
+        step = 0.005  # dv se expresa en unidades de 100 m/s
+        columns = []
+        for axis in range(3):
+            perturbation = np.zeros(3, dtype=np.float64)
+            perturbation[axis] = step
+            high = res_fn(dv + perturbation)
+            low = res_fn(dv - perturbation)
+            columns.append((high - low) / (2.0 * step))
+        return np.column_stack(columns)
+
     opt = least_squares(
         res_fn,
         np.zeros(3, dtype=np.float64),
         method="trf",
         bounds=(-25.0, 25.0),
-        diff_step=1e-3,
+        jac=jac_fn,
         ftol=1e-5,
         xtol=1e-5,
         gtol=1e-5,
-        max_nfev=24,
+        max_nfev=36,
     )
     v0_opt = v0_guess + opt.x * scale
     sol_final = _propagate_3d(
@@ -1097,8 +1141,7 @@ def optimize_round_trip_transfer(
                 break
 
     else:
-        # Modo lunar_orbit: TLI -> LOI en perilunio -> Estancia -> TEI hiperbólica -> Reentrada
-        lunar_orbit_period_s = float(2.0 * np.pi * np.sqrt(r_p_moon**3 / moon.mu_m3_s2))
+        # Modo lunar_orbit: TLI -> LOI en perilunio -> estancia fija -> TEI -> reentrada
 
         for t_out in out_durations:
             remaining_base = max_total_duration_s - (t_out + lunar_stay_s)
@@ -1162,9 +1205,7 @@ def optimize_round_trip_transfer(
                 loi_dv = float(np.linalg.norm(v_loi_inertial - v_arr_m))
 
                 base_depart = t_out + lunar_stay_s
-                t_in = min(t_out, max_total_duration_s - (base_depart + lunar_orbit_period_s))
-                if t_in < 2.2 * 86400.0:
-                    t_in = min(t_out, max_total_duration_s - base_depart)
+                t_in = min(t_out, max_total_duration_s - base_depart)
                 if t_in < 2.2 * 86400.0:
                     continue
 
@@ -1199,53 +1240,17 @@ def optimize_round_trip_transfer(
                 )
                 v_inf_mag = float(np.linalg.norm(v_inf_dep))
                 v_peri_esc = float(np.sqrt(v_inf_mag**2 + 2.0 * moon.mu_m3_s2 / r_p_moon))
-                ecc_hyp = 1.0 + (r_p_moon * v_inf_mag**2) / moon.mu_m3_s2
-                beta_turn = float(np.arcsin(min(1.0, 1.0 / ecc_hyp)))
-
-                v_inf_plane = v_inf_dep - float(np.dot(v_inf_dep, u_hm)) * u_hm
-                norm_vip = float(np.linalg.norm(v_inf_plane))
-                u_v_inf = v_inf_plane / norm_vip if norm_vip > 0 else -m_vel_dep / np.linalg.norm(m_vel_dep)
-                u_v_req = math.cos(beta_turn) * u_v_inf - math.sin(beta_turn) * np.cross(u_hm, u_v_inf)
-
-                max_stay_end = min(
-                    base_depart + lunar_orbit_period_s,
-                    max_total_duration_s - 2.2 * 86400.0,
-                )
-                sol_stay_base = None
                 t_depart_moon = base_depart
-                r_tei = r_arr_m
-                v_pre_tei = v_loi_inertial
 
-                if max_stay_end > t_out + 60.0:
-                    sol_stay_base = _propagate_3d(
-                        bodies,
-                        np.concatenate((r_arr_m, v_loi_inertial)),
-                        t_out,
-                        max_stay_end,
-                        rtol=1e-8,
-                        atol=1e-8,
-                        dense_output=True,
-                        strict_impact=True,
-                        max_step=1800.0,
-                    )
-                    if not sol_stay_base.success:
-                        reasons.append("La órbita lunar intermedia impactó la Luna")
-                        continue
-
-                    sample_times = np.linspace(min(base_depart, max_stay_end), max_stay_end, 36)
-                    best_align = -2.0
-                    for t_cand in sample_times:
-                        y_c = sol_stay_base.sol(float(t_cand))
-                        v_rel_c = y_c[3:] - np.asarray(moon.speed(float(t_cand)))
-                        u_v_c = v_rel_c / np.linalg.norm(v_rel_c)
-                        align = float(np.dot(u_v_c, u_v_req))
-                        if align > best_align:
-                            best_align = align
-                            t_depart_moon = float(t_cand)
-
-                    y_tei = sol_stay_base.sol(t_depart_moon)
-                    r_tei = y_tei[:3]
-                    v_pre_tei = y_tei[3:]
+                # El instante TEI es fijo: no se añade otra vuelta para ajustar la fase.
+                sol_stay_base, y_tei = _propagate_fixed_lunar_stay(
+                    bodies, np.concatenate((r_arr_m, v_loi_inertial)), t_out, lunar_stay_s
+                )
+                if y_tei is None:
+                    reasons.append("La órbita lunar no pudo mantenerse durante el tiempo solicitado")
+                    continue
+                r_tei = y_tei[:3]
+                v_pre_tei = y_tei[3:]
 
                 t_end = t_depart_moon + t_in
                 if t_end > max_total_duration_s:

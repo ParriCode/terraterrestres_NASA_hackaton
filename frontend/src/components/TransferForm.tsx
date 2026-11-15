@@ -19,7 +19,7 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
   const [objective, setObjective] = useState<TransferObjective>('energia')
   const [missionMode, setMissionMode] = useState<MissionMode>('lunar_transfer')
   const [orbitAltitudeKm, setOrbitAltitudeKm] = useState('100')
-  const [lunarRevolutions, setLunarRevolutions] = useState('1')
+  const [lunarStayHours, setLunarStayHours] = useState('6')
   const [error, setError] = useState('')
   const isReturn = missionMode !== 'lunar_transfer'
 
@@ -43,15 +43,19 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
     if (missionMode === 'lunar_orbit_return' && (durationDays < 4 || !Number.isFinite(altitude) || altitude < 50 || altitude > 500)) {
       return setError('Para orbitar y regresar, usa al menos 6 días y una órbita de 50 a 500 km de altitud.')
     }
-    const revolutions = Number(lunarRevolutions)
-    if (missionMode === 'lunar_orbit_return' && (!lunarRevolutions.trim() ||
-      !Number.isSafeInteger(revolutions) || revolutions < 1 || revolutions > 100)) {
-      return setError('Introduce un número entero de vueltas lunares entre 1 y 100.')
+    const stayHours = Number(lunarStayHours)
+    if (missionMode === 'lunar_orbit_return') {
+      if (!lunarStayHours.trim() || !Number.isFinite(stayHours) || stayHours < 0.5 || stayHours > 336) {
+        return setError('Introduce una estancia lunar entre 0,5 y 336 horas (14 días).')
+      }
+      if (durationDays * 24 < 5.5 * 24 + stayHours) {
+        return setError('La duración máxima debe permitir la estancia lunar más al menos 5,5 días para ida y regreso.')
+      }
     }
     setError('')
     onSubmit({
       mission_mode: missionMode,
-      ...(missionMode === 'lunar_orbit_return' ? { orbit_altitude_km: altitude, lunar_revolutions: revolutions } : {}),
+      ...(missionMode === 'lunar_orbit_return' ? { orbit_altitude_km: altitude, lunar_stay_s: stayHours * 3600 } : {}),
       date: instant.toISOString(),
       duration_s: durationDays * SECONDS_PER_DAY,
       launch_angle_deg: FIXED_LAUNCH_ANGLE_DEG,
@@ -93,11 +97,11 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
         <input type="number" min="50" max="500" step="10" value={orbitAltitudeKm}
           onChange={e => setOrbitAltitudeKm(e.target.value)} disabled={busy} required />
       </label>
-      <label>Vueltas alrededor de la Luna
-        <input type="number" inputMode="numeric" min="1" max="100" step="1"
-          value={lunarRevolutions} onChange={e => setLunarRevolutions(e.target.value)}
+      <label>Tiempo en órbita lunar (horas)
+        <input type="number" min="0.5" max="336" step="0.5"
+          value={lunarStayHours} onChange={e => setLunarStayHours(e.target.value)}
           disabled={busy} required />
-        <small className="form-help">El simulador comprobará que se completen las vueltas solicitadas y que quede tiempo para volver a la Tierra.</small>
+        <small className="form-help">La estancia es un tiempo fijo. Las vueltas resultantes dependen de la altitud orbital y se calculan a partir de la trayectoria.</small>
       </label>
     </>}
     <label>Masa de la nave (kg)
@@ -113,7 +117,7 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
       </div>
     </fieldset>
     <p className="form-note">{missionMode === 'lunar_orbit_return'
-      ? 'Perfil Apolo 11: inserción en órbita lunar, estancia y regreso. Inspirado en esa misión, sin alunizaje ni aterrizaje simulado.'
+      ? 'Perfil Apolo 11: inserción en órbita lunar, estancia durante el tiempo indicado y regreso. Sin alunizaje ni aterrizaje simulado.'
       : missionMode === 'free_return'
         ? 'Perfil Apolo 8/13: retorno libre alrededor de la Luna, inspirado especialmente en la trayectoria de emergencia del Apolo 13. No es una reconstrucción histórica exacta.'
         : 'El ángulo de llegada se busca automáticamente entre alternativas válidas. La duración es fija.'}</p>

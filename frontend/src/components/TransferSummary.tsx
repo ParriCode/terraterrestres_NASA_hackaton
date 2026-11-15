@@ -32,7 +32,8 @@ export default function TransferSummary({ transfer, state }: Props) {
         <div><span>Tiempo de regreso</span><strong>{(transfer.duration_s / 86400).toLocaleString('es-ES', { maximumFractionDigits: 2 })} días</strong>
           <small>Máximo solicitado: {((transfer.requested_duration_s ?? transfer.duration_s) / 86400).toLocaleString('es-ES', { maximumFractionDigits: 2 })} días</small></div>
         <div><span>Altitud orbital</span><strong>{transfer.lunar_orbit.altitude_km} km</strong>
-          <small>{transfer.lunar_orbit.actual_revolutions.toFixed(2)} vueltas propagadas</small></div>
+          <small>{transfer.lunar_orbit.actual_revolutions.toFixed(2)} vueltas calculadas</small></div>
+        <div><span>Tiempo en órbita lunar</span><strong>{((transfer.lunar_orbit.orbit_departure_t_s - transfer.lunar_orbit.orbit_insertion_t_s) / 3600).toLocaleString('es-ES', { maximumFractionDigits: 2 })} horas</strong></div>
         <div><span>{transfer.earth_entry?.validated ? 'Llegada a la Tierra' : 'Radio de regreso declarado'}</span>
           <strong>{transfer.earth_entry?.validated
             ? `${transfer.earth_entry.altitude_km} km de altitud`
@@ -56,7 +57,9 @@ export default function TransferSummary({ transfer, state }: Props) {
         <div><span>Δv total de maniobras</span><strong>{formatKmS(transfer.mission_solution.total_delta_v_m_s)}</strong>
           <small>TLI {formatKmS(transfer.mission_solution.tli_delta_v_m_s)} · LOI {formatKmS(transfer.mission_solution.loi_delta_v_m_s)} · TEI {formatKmS(transfer.mission_solution.tei_delta_v_m_s)}</small></div>
         <div><span>Altitud mínima lunar</span><strong>{transfer.mission_solution.min_lunar_altitude_km.toFixed(1)} km</strong></div>
-        {transfer.mission_solution.mode === 'lunar_orbit' && <div><span>Vueltas lunares verificadas</span><strong>{transfer.mission_solution.actual_lunar_revolutions.toFixed(2)}</strong></div>}
+        {transfer.mission_solution.mode === 'lunar_orbit' && <div><span>Tiempo en órbita lunar</span>
+          <strong>{(transfer.mission_solution.lunar_stay_s / 3600).toLocaleString('es-ES', { maximumFractionDigits: 2 })} horas</strong>
+          <small>{transfer.mission_solution.actual_lunar_revolutions.toFixed(2)} vueltas calculadas a partir de la trayectoria</small></div>}
         <div><span>Llegada a la Tierra</span><strong>{transfer.earth_entry?.altitude_km.toFixed(2)} km de altitud</strong><small>Movimiento entrante: {transfer.earth_entry?.inbound ? 'sí' : 'no'}</small></div>
         <div><span>Velocidad relativa de llegada</span><strong>{formatKmS(transfer.earth_entry?.relative_speed_m_s ?? 0)}</strong></div>
       </div>

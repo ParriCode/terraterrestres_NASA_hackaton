@@ -28,9 +28,11 @@ En Linux puede ser necesario usar `python3 run.py`. Antes de arrancar, instala l
 
 ## Configuración de órbita lunar
 
-En la modalidad **Apolo 11** se puede solicitar un número entero de **1 a 100 vueltas** lunares. El backend convierte esa cantidad en un tiempo de estancia estimado a partir del período circular correspondiente a la altitud escogida y comprueba las revoluciones propagadas. La duración total de misión debe permitir la ida, la estancia y el regreso.
+En la modalidad **Apolo 11**, el usuario indica la **altitud lunar** y el **tiempo fijo de permanencia en órbita**, en horas. React convierte las horas a segundos (`lunar_stay_s`) para el endpoint `POST /missions/round-trip`. El motor propaga la nave hasta el instante de salida solicitado; no añade otra revolución ni convierte un número de vueltas en duración.
 
-La cantidad solicitada no asegura la existencia de una transferencia viable: si no se completan las vueltas o la llegada terrestre, el sistema devuelve `no_feasible_solution`.
+Las **vueltas lunares efectivamente propagadas** se muestran únicamente como resultado de la simulación: dependen de la altitud y de la dinámica integrada. La duración máxima de misión debe cubrir ida, estancia y retorno. Si no encuentra una solución válida con ese tiempo, responde `no_feasible_solution`.
+
+**Nota sobre compatibilidad:** el endpoint antiguo `/transfers/lunar-orbit-return` pertenece a un simulador planar distinto y mantiene su interfaz histórica. La interfaz React actual utiliza `/missions/round-trip`, que acepta directamente `lunar_stay_s`.
 
 ## Limitaciones
 

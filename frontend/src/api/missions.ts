@@ -67,8 +67,8 @@ export async function requestRoundTripMission(
     max_total_duration_s: form.duration_s,
     lunar_periapsis_alt_m: (form.orbit_altitude_km ?? 150) * 1000,
     reentry_alt_m: 120000,
-    samples: Math.min(4000, Math.max(500, form.samples, 200 + 18 * (form.lunar_revolutions ?? 1))),
-    ...(mode === 'lunar_orbit' ? { lunar_revolutions: form.lunar_revolutions ?? 1 } : {}),
+    samples: Math.min(4000, Math.max(500, form.samples, Math.ceil((form.lunar_stay_s ?? 0) / 450))),
+    ...(mode === 'lunar_orbit' ? { lunar_stay_s: form.lunar_stay_s ?? 0 } : {}),
   }
   let response: Response
   try {
@@ -147,11 +147,9 @@ export async function requestRoundTripMission(
     return_interface_radius_m: bodyRadius + 120000,
     ...(data.mode === 'lunar_orbit' ? { lunar_orbit: {
       altitude_km: altitudeKm,
-      revolutions: form.lunar_revolutions ?? 1,
       actual_revolutions: data.actual_lunar_revolutions,
       orbit_insertion_t_s: tOut,
       orbit_departure_t_s: tTei,
-      orbital_period_s: data.lunar_stay_s / Math.max(1, form.lunar_revolutions ?? 1),
       return_arrival_direction_deg: null,
       verified_return: true,
     } } : {}),

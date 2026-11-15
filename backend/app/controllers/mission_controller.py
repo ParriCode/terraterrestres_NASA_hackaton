@@ -8,11 +8,10 @@ import math
 import numpy as np
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import AwareDatetime, BaseModel, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from app.mission.data.ephemeris import EphemerisError
 from app.mission.models.domain import REFERENCE_FRAME
-from app.mission.data.bodies import load_bodies
 from app.services.mission_optimizer import (
     DEFAULT_PARKING_ALT_M,
     NoFeasibleTransfer,
@@ -73,6 +72,8 @@ class OptimizeTransferRequest(BaseModel):
 class RoundTripTransferRequest(BaseModel):
     """Petición para trayectoria completa Tierra → Luna → Tierra."""
 
+    model_config = ConfigDict(extra="forbid")
+
     date: AwareDatetime
     mode: Literal["free_return", "lunar_orbit"] = "free_return"
     max_total_duration_s: float = Field(
@@ -94,14 +95,11 @@ class RoundTripTransferRequest(BaseModel):
     initial_mass_kg: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     isp_s: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     mass_kg: float = Field(default=1000, gt=0, allow_inf_nan=False)
-    lunar_revolutions: int | None = Field(default=None, ge=1, le=100, strict=True)
 
     @model_validator(mode="after")
     def _validate_round_trip(self):
         if (self.initial_mass_kg is None) != (self.isp_s is None):
             raise ValueError("initial_mass_kg e isp_s deben proporcionarse juntos.")
-        if self.mode == "free_return" and self.lunar_revolutions is not None:
-            raise ValueError("free_return no admite número de vueltas lunares.")
         if self.mode == "free_return" and self.lunar_stay_s > 0:
             raise ValueError("El modo free_return no admite estancia orbital (lunar_stay_s > 0).")
         return self
@@ -350,24 +348,18 @@ def round_trip(request: RoundTripTransferRequest):
     """Calcula trayectoria completa Tierra → Luna → Tierra (retorno libre u órbita lunar)."""
     mass_kg = request.initial_mass_kg if request.initial_mass_kg is not None else request.mass_kg
     stay_s = request.lunar_stay_s
-    if request.lunar_revolutions is not None:
-        moon = load_bodies()["moon"]
-        radius = moon.radius_m + request.lunar_periapsis_alt_m
-        period_s = 2.0 * math.pi * math.sqrt(radius ** 3 / moon.mu_m3_s2)
-        stay_s = period_s * request.lunar_revolutions
-        if stay_s > 14 * 86400 or stay_s + 5.5 * 86400 > request.max_total_duration_s:
-            return {
-                "status": "no_feasible_solution",
-                "source": "NASA/JPL Horizons",
-                "mode": request.mode,
-                "date": request.date,
-                "max_total_duration_s": request.max_total_duration_s,
-                "reasons": [
-                    f"La ventana de {request.max_total_duration_s / 86400:.1f} días no permite "
-                    f"{request.lunar_revolutions} vueltas lunares "
-                    f"({stay_s / 86400:.2f} días de estancia), más la ida y el retorno."
-                ],
-            }
+    if request.mode == "lunar_orbit" and stay_s + 5.5 * 86400 > request.max_total_duration_s:
+        return {
+            "status": "no_feasible_solution",
+            "source": "NASA/JPL Horizons",
+            "mode": request.mode,
+            "date": request.date,
+            "max_total_duration_s": request.max_total_duration_s,
+            "reasons": [
+                f"La ventana de {request.max_total_duration_s / 86400:.2f} días no permite "
+                f"{stay_s / 3600:.2f} horas fijas en órbita lunar más la ida y el regreso."
+            ],
+        }
     try:
         rt = optimize_round_trip_transfer(
             request.date,
@@ -408,10 +400,11 @@ def round_trip(request: RoundTripTransferRequest):
     # El retorno no debe aparecer como éxito si la geometría es incorrecta.
     validated = incoming and error_m <= 40_000.0
     revolutions_completed = _lunar_orbits_completed(rt)
-    if request.lunar_revolutions is not None and abs(revolutions_completed - request.lunar_revolutions) > 0.20:
+    if request.mode == "lunar_orbit" and not math.isclose(rt.lunar_stay_s, stay_s, abs_tol=1e-3, rel_tol=0.0):
         return {"status": "no_feasible_solution", "source": "NASA/JPL Horizons", "mode": request.mode,
                 "date": request.date, "max_total_duration_s": request.max_total_duration_s,
-                "reasons": [f"Se propagaron {revolutions_completed:.2f} vueltas; se solicitaron {request.lunar_revolutions}."]}
+                "reasons": [f"El tiempo de estancia calculado ({rt.lunar_stay_s / 3600:.2f} h) "
+                            f"no coincide con el solicitado ({stay_s / 3600:.2f} h)."]}
     if not validated:
         return {"status": "no_feasible_solution", "source": "NASA/JPL Horizons", "mode": request.mode,
                 "date": request.date, "max_total_duration_s": request.max_total_duration_s,
