@@ -68,7 +68,7 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
         <button type="button" aria-pressed={missionMode === 'free_return'} className={missionMode === 'free_return' ? 'active' : ''}
           onClick={() => { setMissionMode('free_return'); setObjective('energia') }}>Apolo 8/13</button>
         <button type="button" aria-pressed={missionMode === 'lunar_orbit_return'} className={missionMode === 'lunar_orbit_return' ? 'active' : ''}
-          onClick={() => { setMissionMode('lunar_orbit_return'); setObjective('energia') }}>Apolo 11</button>
+          onClick={() => { setMissionMode('lunar_orbit_return'); setObjective('energia') }}>Apolo 11/Artemis</button>
       </div>
     </fieldset>
     <label>Fecha de salida (UTC)
