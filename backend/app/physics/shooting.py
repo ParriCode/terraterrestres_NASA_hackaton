@@ -1,7 +1,10 @@
 """Corrección tridimensional de una velocidad inicial mediante shooting."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass
+import math
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -54,32 +57,50 @@ def solve_shooting(
         initial = initial[:2]
 
     def normalized_residual(normalized_velocity: np.ndarray) -> np.ndarray:
-        velocity = tuple(float(value * velocity_scale_m_s) for value in normalized_velocity)
-        if planar:
-            velocity = (*velocity, 0.0)
-        residual = arrival_residual(velocity)  # type: ignore[arg-type]
+        velocity: Vec3 = (
+            (float(normalized_velocity[0] * velocity_scale_m_s), float(normalized_velocity[1] * velocity_scale_m_s), 0.0)
+            if planar
+            else (
+                float(normalized_velocity[0] * velocity_scale_m_s),
+                float(normalized_velocity[1] * velocity_scale_m_s),
+                float(normalized_velocity[2] * velocity_scale_m_s),
+            )
+        )
+        residual = arrival_residual(velocity)
         validate_vec3(residual, "arrival_residual")
         return np.asarray(residual[:2] if planar else residual, dtype=float) / residual_scale_m
+
+    solver_tol = min(
+        1e-8 if planar else 1e-13,
+        max(1e-14, 1e-3 * (arrival_tolerance_m / residual_scale_m)),
+    )
 
     optimization = least_squares(
         normalized_residual,
         initial,
         method="lm" if planar else "trf",
         max_nfev=max_evaluations,
-        xtol=1e-7,
-        ftol=1e-7,
-        gtol=1e-7,
+        xtol=solver_tol,
+        ftol=solver_tol,
+        gtol=solver_tol,
     )
 
-    velocity = tuple(float(value * velocity_scale_m_s) for value in optimization.x)
-    if planar:
-        velocity = (*velocity, 0.0)
-    residual = tuple(float(value) for value in arrival_residual(velocity))  # type: ignore[arg-type]
-    validate_vec3(residual, "arrival_residual")
-    residual_norm = float(np.linalg.norm(residual))
+    velocity: Vec3 = (
+        (float(optimization.x[0] * velocity_scale_m_s), float(optimization.x[1] * velocity_scale_m_s), 0.0)
+        if planar
+        else (
+            float(optimization.x[0] * velocity_scale_m_s),
+            float(optimization.x[1] * velocity_scale_m_s),
+            float(optimization.x[2] * velocity_scale_m_s),
+        )
+    )
+    raw_residual = arrival_residual(velocity)
+    validate_vec3(raw_residual, "arrival_residual")
+    residual: Vec3 = (float(raw_residual[0]), float(raw_residual[1]), float(raw_residual[2]))
+    residual_norm = math.hypot(residual[0], residual[1], residual[2])
     return ShootingResult(
-        initial_velocity_m_s=velocity,  # type: ignore[arg-type]
-        arrival_residual_m=residual,  # type: ignore[arg-type]
+        initial_velocity_m_s=velocity,
+        arrival_residual_m=residual,
         residual_norm_m=residual_norm,
         converged=bool(optimization.success and residual_norm <= arrival_tolerance_m),
         evaluations=int(optimization.nfev),
