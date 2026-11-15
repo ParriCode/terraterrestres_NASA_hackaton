@@ -10,7 +10,7 @@ export default function TransferSummary({ transfer, state }: Props) {
   const v0 = transfer.initial_velocity_m_s
   return <aside className="results-panel">
     <h2><Icon name="layers" size={16} />Resultado</h2>
-    <p className="result-caption">{transfer.mission_mode === 'lunar_orbit_return' ? 'Apolo 11 · ' : transfer.mission_mode === 'free_return' ? 'Apolo 8/13 · ' : ''}{transfer.mission_solution || transfer.mission_one_way_delta_v_m_s != null ? 'Optimización orbital (Δv)' : 'Mínima energía'} · {transfer.source}</p>
+    <p className="result-caption">{transfer.mars_mission ? 'Tierra → Marte · solo ida · ' : ''}{transfer.mission_mode === 'lunar_orbit_return' ? 'Apolo 11 · ' : transfer.mission_mode === 'free_return' ? 'Apolo 8/13 · ' : ''}{transfer.mars_mission || transfer.mission_solution || transfer.mission_one_way_delta_v_m_s != null ? 'Optimización orbital (Δv)' : 'Mínima energía'} · {transfer.source}</p>
     <div className="result-grid">
       <div><span>Velocidad inicial (baricéntrica)</span><strong>{formatKmS(norm(v0))}</strong>
         <small>({kms(v0[0])}, {kms(v0[1])}) km/s</small></div>
@@ -26,6 +26,32 @@ export default function TransferSummary({ transfer, state }: Props) {
           {transfer.optimization.search_complete ? ' · Búsqueda acotada finalizada' : ' · Búsqueda limitada por tiempo'}
         </small>}</div>}
     </div>
+    {transfer.mars_mission && (() => {
+      const m = transfer.mars_mission
+      const days = (s: number) => (s / 86400).toLocaleString('es-ES', { maximumFractionDigits: 0 })
+      const best = [...m.tradeoff].sort((a, b) => a.estimated_total_delta_v_m_s - b.estimated_total_delta_v_m_s)[0]
+      return <>
+        <h3><Icon name="orbit" size={14} />Transferencia a Marte</h3>
+        <div className="result-grid">
+          <div><span>Duración del viaje</span><strong>{days(transfer.duration_s)} días</strong>
+            <small>Máximo solicitado: {days(transfer.requested_duration_s ?? transfer.duration_s)} días</small></div>
+          <div><span>Δv total (TMI + MOI)</span><strong>{formatKmS(m.total_delta_v_m_s)}</strong>
+            <small>TMI {formatKmS(m.tmi_delta_v_m_s)} · MOI {formatKmS(m.moi_delta_v_m_s)} · cribado Lambert {formatKmS(m.estimated_total_delta_v_m_s)}</small></div>
+          <div><span>Salida (TMI)</span><strong>{formatKmS(m.tmi_delta_v_m_s)}</strong>
+            <small>Desde órbita terrestre de {m.parking_alt_km.toLocaleString('es-ES')} km</small></div>
+          <div><span>Llegada a Marte (MOI)</span><strong>{formatKmS(m.moi_delta_v_m_s)}</strong>
+            <small>v∞ de llegada {formatKmS(m.arrival_v_infinity_m_s)}</small></div>
+          <div><span>Altitud mínima en Marte</span><strong>{m.min_mars_altitude_km.toLocaleString('es-ES', { maximumFractionDigits: 0 })} km</strong>
+            <small>Objetivo: {m.mars_periapsis_alt_km.toLocaleString('es-ES')} km</small></div>
+          <div><span>Propelente estimado</span><strong>{m.propellant.propellant_mass_kg.toLocaleString('es-ES', { maximumFractionDigits: 0 })} kg</strong>
+            <small>{(m.propellant.mass_fraction * 100).toFixed(1)} % de {m.propellant.initial_mass_kg.toLocaleString('es-ES')} kg · Isp {m.propellant.isp_s} s (Tsiolkovski)</small></div>
+          {best && <div><span>Curva Δv–duración</span><strong>{m.tradeoff.length} duraciones evaluadas</strong>
+            <small>Mínimo del cribado: {formatKmS(best.estimated_total_delta_v_m_s)} a {days(best.duration_s)} días</small></div>}
+        </div>
+        <p className="form-note">Fase: <strong>{state.t_s >= transfer.duration_s - 1 ? 'Llegada al periapsis de Marte' : `En crucero hacia Marte · día ${days(state.t_s)}`}</strong></p>
+        <p className="results-disclaimer">Cónicas parcheadas para el cribado y propagación N-cuerpos 3D (Sol, Tierra, Luna y Marte). Δv impulsivos ideales; búsqueda acotada.</p>
+      </>
+    })()}
     {transfer.lunar_orbit && !transfer.mission_solution && <>
       <h3><Icon name="orbit" size={14} />Órbita lunar y retorno</h3>
       <div className="result-grid">
@@ -71,6 +97,6 @@ export default function TransferSummary({ transfer, state }: Props) {
       <div><span>Velocidad (vx, vy)</span><strong>({kms(state.velocity_m_s[0])}, {kms(state.velocity_m_s[1])}) km/s</strong>
         <small>|v| = {formatKmS(norm(state.velocity_m_s))}</small></div>
     </div>
-    <p className="results-disclaimer">{transfer.mission_solution ? 'Motor orbital 3D, proyectado al plano ICRF XY.' : 'Modelo planar baricéntrico Tierra–Luna.'} Valores intermedios interpolados localmente entre {transfer.samples.length} muestras del backend.</p>
+    <p className="results-disclaimer">{transfer.mars_mission ? 'Motor orbital 3D heliocéntrico, proyectado al plano ICRF XY.' : transfer.mission_solution ? 'Motor orbital 3D, proyectado al plano ICRF XY.' : 'Modelo planar baricéntrico Tierra–Luna.'} Valores intermedios interpolados localmente entre {transfer.samples.length} muestras del backend.</p>
   </aside>
 }

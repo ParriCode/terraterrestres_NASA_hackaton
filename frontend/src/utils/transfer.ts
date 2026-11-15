@@ -17,10 +17,10 @@ export function findSampleInterval(samples: TransferSample[], time: number): num
 }
 
 /** Tangente de un cuerpo en la muestra i por diferencias centradas (el backend no envía su velocidad). */
-function bodyTangent(samples: TransferSample[], i: number, key: 'earth' | 'moon'): Vec3 {
+function bodyTangent(samples: TransferSample[], i: number, key: 'earth' | 'moon' | 'sun' | 'mars'): Vec3 {
   const a = samples[Math.max(0, i - 1)], b = samples[Math.min(samples.length - 1, i + 1)]
   const invDt = 1 / (b.t_s - a.t_s)
-  const pa = a.body_positions_m[key], pb = b.body_positions_m[key]
+  const pa = a.body_positions_m[key]!, pb = b.body_positions_m[key]!
   return [(pb[0] - pa[0]) * invDt, (pb[1] - pa[1]) * invDt, (pb[2] - pa[2]) * invDt]
 }
 
@@ -79,7 +79,13 @@ export function stateAt(samples: TransferSample[], t: number): TransferState {
     h00, h10h, h01, h11h,
   )
 
-  return { t_s: time, position_m: position, velocity_m_s: velocity, earth_m: earth, moon_m: moon }
+  // Sol y Marte solo existen en las transferencias a Marte; el resto no cambia.
+  const optional = (key: 'sun' | 'mars') => a.body_positions_m[key] && b.body_positions_m[key]
+    ? hermiteVec3(a.body_positions_m[key]!, bodyTangent(samples, lo, key), b.body_positions_m[key]!, bodyTangent(samples, lo + 1, key), h00, h10h, h01, h11h)
+    : undefined
+  const sun = optional('sun'), mars = optional('mars')
+  return { t_s: time, position_m: position, velocity_m_s: velocity, earth_m: earth, moon_m: moon,
+    ...(sun ? { sun_m: sun } : {}), ...(mars ? { mars_m: mars } : {}) }
 }
 
 export const norm = (v: Vec3) => Math.hypot(v[0], v[1], v[2])

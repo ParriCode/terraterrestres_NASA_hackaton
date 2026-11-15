@@ -1094,3 +1094,158 @@
   .scene-heading-local { top: 77px; }
   .map-tools { top: 125px; }
 }
+
+/* Marte (solo ida): órbita y estela del planeta, brillo solar en la vista heliocéntrica. */
+.mars-track { fill: none; stroke: #ff9a6b; opacity: .7; }
+.sun-glow { fill: #ffc24d; opacity: .18; }
+
+/* Leyenda (izquierda) y fuentes (derecha) comparten la franja inferior sin solaparse. */
+.view-legend { right: auto; max-width: 56%; }
+.source-disclaimer { max-width: 40%; }
+
+
+/* Integración 3D sin reemplazar el estilo 2D de desarrollo-alesis */
+/* VISOR ORBITAL4B 3D - WebGL, independiente de librerías externas */
+.space-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: grab;
+    outline: none;
+    touch-action: none;
+    background: #020611;
+}
+.space-canvas:active { cursor: grabbing; }
+.transfer-view-3d { isolation: isolate; }
+.space-label {
+    position: absolute;
+    transform: translate(-50%, calc(-100% - var(--object-offset, 17px)));
+    pointer-events: none;
+    z-index: 2;
+    padding: 5px 9px;
+    border: 1px solid rgba(156, 196, 243, .31);
+    border-radius: 7px;
+    background: rgba(3, 15, 32, .76);
+    color: #e8f4ff;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.3px;
+    white-space: nowrap;
+    box-shadow: 0 4px 24px #0006;
+}
+.space-label::after {
+    content: '';
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+    left: calc(50% - 2px);
+    bottom: -10px;
+    box-shadow: 0 0 9px currentColor;
+}
+.space-label-earth { color: #77c8ff; }
+.space-label-moon { color: #e1e5f0; }
+.space-label-ship { color: #76f9dc; }
+.space-dimension {
+    display: inline-block;
+    margin-left: 8px;
+    border: 1px solid #58dbd0;
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-size: 9px;
+    color: #a2fdf0;
+    background: rgba(18, 78, 88, .42);
+}
+.space-heading { max-width: 390px; z-index: 3; }
+.space-sun { z-index: 3; }
+.space-controls { z-index: 11; }
+.space-control-divider { height: 1px; background: #344a65; margin: 2px 5px; }
+.space-target { font-size: 18px; }
+.space-view-options {
+    position: absolute;
+    right: 19px;
+    bottom: 83px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    z-index: 7;
+    padding: 10px 12px;
+    background: rgba(7, 21, 39, .86);
+    border: 1px solid #33506d;
+    border-radius: 11px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #cedeee;
+    backdrop-filter: blur(8px);
+}
+.space-view-options label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.space-view-options input { margin: 0; accent-color: #61ddc9; }
+.space-render-error {
+    position: absolute;
+    left: 50%;
+    top: 46%;
+    transform: translate(-50%, -50%);
+    background: #112039;
+    padding: 20px 24px;
+    border: 1px solid #e59b70;
+    border-radius: 13px;
+    z-index: 10;
+    max-width: 400px;
+    text-align: center;
+}
+.space-render-error p { color: #b5cbe4; font-size: 13px; }
+.space-legend { bottom: 31px; right: 18px; max-width: 75%; }
+@media (max-width: 680px) {
+    .space-heading { top: 18px; left: 16px; max-width: calc(100% - 100px); }
+    .space-heading h1 { font-size: 16px; }
+    .space-heading p { font-size: 10px; }
+    .space-controls { top: 135px; right: 10px; gap: 5px; }
+    .space-controls .icon-button { width: 33px; height: 33px; }
+    .space-view-options { right: 10px; bottom: 83px; font-size: 10px; }
+    .space-label { font-size: 8px; }
+    .space-legend { left: 11px; right: 11px; max-width: 100%; bottom: 27px; font-size: 9px; }
+}
+
+.space-sun-source { color: #acf5d9; font-size: 10px; font-weight: 800; letter-spacing: .6px; }
+
+/* Selector de dimensiones compartido por los dos renderizadores. */
+.scene-switch { top: 16px; left: 50%; z-index: 55; }
+.scene-switch .scene-tab { min-width: 98px; justify-content: center; }
+.scene-switch .scene-tab.active { background: #20544f; color: #abffef; }
+/* Renders físicos inválidos: no se falsea un impacto lunar en el frontend. */
+.space-physics-warning { position:absolute; bottom: 115px; left: 18px; max-width: 390px;
+  padding: 9px 12px; border: 1px solid #daac68; border-radius: 8px;
+  background: rgba(49,34,21,.91); color: #ffe0ad; font-size: 11px; z-index: 12; }
+@media (max-width: 680px) {
+  .scene-switch { top: 13px; left: auto; right: 9px; transform: none; }
+  .scene-switch .scene-tab { min-width: 0; font-size: 10px; padding: 7px 9px; }
+  .space-physics-warning { left: 10px; bottom: 129px; right: 10px; max-width: 100%; }
+  .space-sun { top: 64px; }
+  .space-heading { top: 124px; }
+  .space-controls { top: 204px; }
+}
+
+/* Vista 3D del sistema solar, leyenda y etiquetas sobre WebGL */
+.solar-view.solar-view-3d { position: absolute; inset: 0; overflow: hidden; isolation: isolate; }
+.solar-3d-label { position:absolute; z-index:4; transform:translate(-50%,-50%); border:1px solid #2b6482;
+  border-radius:10px; color:#e6f0ff; background:rgba(4,15,31,.86); font-size:11px; font-weight:750;
+  padding:5px 9px; cursor:pointer; white-space:nowrap; pointer-events:auto; }
+.solar-3d-label:hover { border-color:#76e9d5; background:#173a4e; }
+.solar-3d-legend { position:absolute;bottom:35px;right:20px;z-index:4; }
+@media(max-width:720px) {.solar-3d-label{font-size:9px;padding:3px 5px} .solar-3d-legend{bottom:90px;}}
+
+/* Selector independiente de sistema Tierra–Luna / Sistema solar */
+.dimension-switch {position:absolute;z-index:57;top:14px;left:50%;transform:translateX(-50%);
+ display:flex;gap:3px;padding:4px;border:1px solid #345169;border-radius:12px;
+ background:rgba(4,18,33,.94);box-shadow:0 7px 25px #0007;pointer-events:auto;}
+.dimension-button {padding:9px 13px;border-radius:9px;border:0;background:transparent;
+ color:#c6d8eb;font-size:12px;font-weight:750;cursor:pointer;white-space:nowrap;}
+.dimension-button.active {background:#20544f;color:#a9fff0;}
+.dimension-button:focus-visible {outline:2px solid #7bead9;outline-offset:2px;}
+@media (max-width:700px){.dimension-switch {left:auto;right:8px;transform:none;top:9px;}
+ .dimension-button{padding:7px 9px;font-size:10px;}}
+
+/* Evita que los dos selectores queden superpuestos en el encabezado. */
+.dimension-switch { top: 65px; }
+@media(max-width:700px) { .dimension-switch { top: 59px; right: 8px; } }

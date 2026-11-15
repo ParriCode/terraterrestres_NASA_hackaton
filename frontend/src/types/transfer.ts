@@ -2,8 +2,11 @@
 export type Vec3 = [number, number, number]
 export type TransferObjective = 'energia' | 'distancia'
 export type MissionMode = 'lunar_transfer' | 'free_return' | 'lunar_orbit_return'
+export type Destination = 'moon' | 'mars'
 
 export type TransferRequest = {
+  destination?: Destination // 'moon' por defecto
+  mars_periapsis_alt_km?: number // solo Marte: altitud objetivo de llegada
   date: string // ISO 8601 con zona horaria
   mission_mode?: MissionMode
   orbit_altitude_km?: number
@@ -19,7 +22,7 @@ export type TransferSample = {
   t_s: number
   position_m: Vec3
   velocity_m_s: Vec3
-  body_positions_m: { earth: Vec3; moon: Vec3 }
+  body_positions_m: { earth: Vec3; moon: Vec3; sun?: Vec3; mars?: Vec3 }
 }
 
 export type TransferBody = { name: string; radius_m: number }
@@ -51,7 +54,30 @@ export type LunarOrbitReport = {
   verified_return: boolean
 }
 
+export type TradeoffPoint = {
+  duration_s: number
+  estimated_launch_delta_v_m_s: number
+  estimated_arrival_delta_v_m_s: number
+  estimated_total_delta_v_m_s: number
+}
+
+/** Métricas de la transferencia Tierra → Marte de solo ida (POST /missions/mars). */
+export type MarsMission = {
+  tmi_delta_v_m_s: number
+  moi_delta_v_m_s: number
+  total_delta_v_m_s: number
+  estimated_total_delta_v_m_s: number
+  arrival_v_infinity_m_s: number
+  min_mars_altitude_km: number
+  mars_periapsis_alt_km: number
+  parking_alt_km: number
+  propellant: { initial_mass_kg: number; isp_s: number; propellant_mass_kg: number; final_mass_kg: number; mass_fraction: number }
+  tradeoff: TradeoffPoint[]
+}
+
 export type TransferResponse = {
+  destination?: Destination
+  mars_mission?: MarsMission
   mission_mode?: 'free_return' | 'lunar_orbit_return'
   return_interface_radius_m?: number
   earth_entry?: {
@@ -94,7 +120,7 @@ export type TransferResponse = {
   path_length_m: number
   arrival_error_m: number
   duration_s: number
-  bodies: { earth: TransferBody; moon: TransferBody }
+  bodies: { earth: TransferBody; moon: TransferBody; sun?: TransferBody; mars?: TransferBody }
   samples: TransferSample[]
 }
 
@@ -105,4 +131,6 @@ export type TransferState = {
   velocity_m_s: Vec3
   earth_m: Vec3
   moon_m: Vec3
+  sun_m?: Vec3 // solo si el backend envía el Sol (Marte)
+  mars_m?: Vec3
 }
