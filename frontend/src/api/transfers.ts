@@ -6,10 +6,12 @@ const TIMEOUT_MS = 5 * 60_000 // el cálculo es síncrono y puede probar varias 
 
 export class ApiError extends Error {
   readonly status: number
-  constructor(status: number, message: string) {
+  readonly code?: string
+  constructor(status: number, message: string, code?: string) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.code = code
   }
 }
 
@@ -36,11 +38,12 @@ function isTransferResponse(value: unknown): value is TransferResponse {
   if (!value || typeof value !== 'object') return false
   const r = value as Partial<TransferResponse>
   const s = r.samples
-  return r.frame === 'earth_moon_barycentric_initial_orbital_plane'
+  const origin = r.origin_id ?? 'earth', destination = r.destination_id ?? 'moon'
+  return (r.frame === 'earth_moon_barycentric_initial_orbital_plane' || r.frame === 'ssb_ecliptic_j2000_projected')
     && typeof r.date === 'string' && Number.isFinite(Date.parse(r.date))
     && isVec3(r.initial_velocity_m_s) && isNum(r.launch_speed_m_s) && isNum(r.launch_energy_j)
     && isNum(r.path_length_m) && isNum(r.arrival_error_m) && isNum(r.duration_s) && isNum(r.arrival_angle_deg)
-    && isNum(r.bodies?.earth?.radius_m) && isNum(r.bodies?.moon?.radius_m)
+    && isNum(r.bodies?.[origin]?.radius_m) && isNum(r.bodies?.[destination]?.radius_m)
     && (r.optimization === undefined || (r.optimization.method === 'bounded_angle_search'
       && Array.isArray(r.optimization.attempted_angles_deg)
       && r.optimization.attempted_angles_deg.every(isNum)
@@ -52,12 +55,12 @@ function isTransferResponse(value: unknown): value is TransferResponse {
     && Array.isArray(s) && s.length >= 2 && s[0].t_s === 0
     && s.every((p, i) => isNum(p.t_s) && (i === 0 || p.t_s > s[i - 1].t_s)
       && isVec3(p.position_m) && isVec3(p.velocity_m_s)
-      && isVec3(p.body_positions_m?.earth) && isVec3(p.body_positions_m?.moon))
+      && isVec3(p.body_positions_m?.[origin]) && isVec3(p.body_positions_m?.[destination]))
 }
 
 export async function requestTransfer(body: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
   const orbitalReturn = body.mission_mode === 'lunar_orbit_return'
-  const url = `${API_BASE_URL}${orbitalReturn ? '/transfers/lunar-orbit-return' : '/transfers/optimize'}`
+  const url = `${API_BASE_URL}${orbitalReturn ? '/transfers/lunar-orbit-return' : '/transfers/solar'}`
   const { mission_mode: _mode, orbit_altitude_km, lunar_revolutions, ...baseBody } = body
   void _mode
   const payload = orbitalReturn ? { ...baseBody, orbit_altitude_km, lunar_revolutions } : baseBody
@@ -79,8 +82,8 @@ export async function requestTransfer(body: TransferRequest, signal?: AbortSigna
     if (response.status === 404 || response.status === 405) throw new ApiError(response.status, `El endpoint ${url} no está disponible. Reinicia FastAPI con el backend actualizado.`)
     if (response.status === 422) {
       const code = (data as { detail?: { code?: string } } | null)?.detail?.code
-      if (code === 'no_valid_transfer' || code === 'no_valid_lunar_orbit_return') {
-        throw new ApiError(422, `No se encontró una transferencia válida: ${detail}`)
+      if (code === 'no_valid_transfer' || code === 'no_valid_lunar_orbit_return' || /^No se encontró (una )?transferencia/i.test(detail)) {
+        throw new ApiError(422, detail, code ?? "no_valid_transfer")
       }
       throw new ApiError(422, `Revisa los parámetros de la simulación: ${detail}`)
     }

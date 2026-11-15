@@ -14,9 +14,9 @@ export default function TransferSummary({ transfer, state }: Props) {
     <div className="result-grid">
       <div><span>Velocidad inicial (baricéntrica)</span><strong>{formatKmS(norm(v0))}</strong>
         <small>({kms(v0[0])}, {kms(v0[1])}) km/s</small></div>
-      <div><span>Velocidad respecto a la Tierra</span><strong>{formatKmS(transfer.launch_speed_m_s)}</strong></div>
+      <div><span>Velocidad respecto al origen</span><strong>{formatKmS(transfer.launch_speed_m_s)}</strong></div>
       <div><span>Energía de lanzamiento</span><strong>{formatMJ(transfer.launch_energy_j)}</strong>
-        <small>{transfer.mass_kg} kg, respecto a la Tierra</small></div>
+        <small>{transfer.mass_kg} kg, respecto al origen</small></div>
       <div><span>Longitud del recorrido</span><strong>{formatKm(transfer.path_length_m)}</strong></div>
       <div><span>{transfer.lunar_orbit ? 'Error de llegada a esfera terrestre' : 'Error de llegada'}</span><strong>{formatMeters(transfer.arrival_error_m)}</strong></div>
       <div><span>{transfer.lunar_orbit ? 'Ángulo de llegada a la Luna' : 'Ángulo de llegada seleccionado'}</span><strong>{transfer.arrival_angle_deg.toLocaleString('es-ES', { maximumFractionDigits: 2 })}°</strong>
@@ -49,6 +49,6 @@ export default function TransferSummary({ transfer, state }: Props) {
       <div><span>Velocidad (vx, vy)</span><strong>({kms(state.velocity_m_s[0])}, {kms(state.velocity_m_s[1])}) km/s</strong>
         <small>|v| = {formatKmS(norm(state.velocity_m_s))}</small></div>
     </div>
-    <p className="results-disclaimer">Marco planar baricéntrico Tierra–Luna (eje X inicial Tierra→Luna, ejes fijos en ICRF). Valores intermedios interpolados localmente entre {transfer.samples.length} muestras del backend.</p>
+    <p className="results-disclaimer">Marco: {transfer.frame}. Gravedad solo de origen y destino. Valores intermedios interpolados localmente entre {transfer.samples.length} muestras del backend.</p>
   </aside>
 }

@@ -44,6 +44,20 @@ Pulsa **«Calcular transferencia»** para obtener el recorrido usando las posici
 
 La aplicación muestra la **velocidad y energía necesarias para salir**, la **distancia recorrida** y el **error de llegada**: cuánto se aleja el punto final calculado del destino elegido.
 
+## 🚨 Sistema solar y datos NASA
+
+Puedes elegir **origen y destino** entre el Sol, los ocho planetas y la Luna, usando los selectores o **«Elegir en el mapa»** y pulsando un cuerpo. La fecha determina sus posiciones; la duración indica el tiempo disponible para llegar y la masa permite calcular la energía de lanzamiento.
+
+Las posiciones y velocidades se consultan en [NASA/JPL Horizons](https://ssd-api.jpl.nasa.gov/doc/horizons.html) para la fecha y el intervalo del viaje. Los radios medios y parámetros gravitatorios proceden de las fichas de los cuerpos del mismo servicio y se guardan, con su fuente y fecha de consulta, en [el catálogo solar](backend/app/data/solar_bodies.json).
+
+Para acelerar la vista, descargamos muestras horarias de cada día y mostramos los cuerpos conforme llegan. Los cambios de hora se interpolan en el navegador sin volver a consultar NASA. Las respuestas se guardan en el servidor hasta siete días, incluso tras reiniciarlo. Las peticiones simultáneas de los usuarios comparten las descargas; el acceso a JPL respeta su [límite de una consulta a la vez](https://ssd-api.jpl.nasa.gov/doc/index.php).
+
+La vista solar proyecta esos datos en 2D y comprime las distancias para facilitar la selección; los iconos están ampliados. Si NASA no responde, se muestra el error, sin sustituir sus datos por posiciones inventadas.
+
+**Modelo simplificado:** sobre la nave solo actúa la gravedad del origen y del destino. El Sol solo influye si es uno de los seleccionados. Los cuerpos siguen las efemérides NASA; la trayectoria de la nave la calcula nuestra aplicación. La llegada es al radio nominal del destino, sin modelar atmósferas, combustible ni captura orbital. Para los gigantes gaseosos y el Sol, ese radio no representa suelo sólido.
+
+Se admiten viajes de hasta 100 años, sujetos a la cobertura de Horizons. La salida se orienta automáticamente hacia una estimación del encuentro y se busca el ángulo de llegada. La búsqueda tiene tiempo limitado y puede no encontrar una solución; no garantiza la ruta óptima ni una misión físicamente viable en el sistema solar completo. El modo de órbita lunar y regreso conserva su límite de 30 días.
+
 ## 🚨 Puesta en marcha
 
 Necesitas Python 3.10 o superior, Node.js compatible con Vite 8 e internet para consultar los datos de NASA.

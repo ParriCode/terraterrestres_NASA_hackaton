@@ -4,6 +4,8 @@ export type TransferObjective = 'energia' | 'distancia'
 export type MissionMode = 'lunar_transfer' | 'lunar_orbit_return'
 
 export type TransferRequest = {
+  origin_id?: string
+  destination_id?: string
   date: string // ISO 8601 con zona horaria
   mission_mode?: MissionMode
   orbit_altitude_km?: number
@@ -19,7 +21,7 @@ export type TransferSample = {
   t_s: number
   position_m: Vec3
   velocity_m_s: Vec3
-  body_positions_m: { earth: Vec3; moon: Vec3 }
+  body_positions_m: Record<string, Vec3>
 }
 
 export type TransferBody = { name: string; radius_m: number }
@@ -61,9 +63,11 @@ export type TransferResponse = {
   maneuvers?: LunarManeuver[]
   total_maneuver_delta_v_m_s?: number
   model_limitations?: string[]
+  origin_id?: string
+  destination_id?: string
   source: string
   date: string
-  frame: 'earth_moon_barycentric_initial_orbital_plane'
+  frame: 'earth_moon_barycentric_initial_orbital_plane' | 'ssb_ecliptic_j2000_projected'
   basis_icrf: number[][]
   objective: TransferObjective
   mass_kg: number
@@ -75,7 +79,7 @@ export type TransferResponse = {
   path_length_m: number
   arrival_error_m: number
   duration_s: number
-  bodies: { earth: TransferBody; moon: TransferBody }
+  bodies: Record<string, TransferBody>
   samples: TransferSample[]
 }
 

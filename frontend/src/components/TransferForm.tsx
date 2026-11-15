@@ -2,28 +2,31 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import type { MissionMode, TransferObjective, TransferRequest } from '../types/transfer'
 import Icon from './Icon'
+import { BODIES } from '../data/solarSystem'
 
 /** La fecha se interpreta como UTC y la duración se envía en segundos. */
 const FIXED_LAUNCH_ANGLE_DEG = 90
 const SAMPLES = 400
 const SECONDS_PER_DAY = 86400
-const MAX_DAYS = 30 // backend/app/controllers/transfer_controller.py
+const MAX_DAYS = 36525 // backend/app/controllers/transfer_controller.py
 
 function utcNowForInput(): string { return new Date().toISOString().slice(0, 16) }
-type Props = { busy: boolean; onSubmit: (request: TransferRequest) => void; onCancel: () => void; onDateChange?: (date: Date) => void }
+type Props = { origin: string; destination: string; onOrigin: (id: string) => void; onDestination: (id: string) => void; onPick: (target: "origin" | "destination") => void; busy: boolean; onSubmit: (request: TransferRequest) => void; onCancel: () => void; onDateChange?: (date: Date) => void }
 
-export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }: Props) {
+export default function TransferForm({ busy, onSubmit, onCancel, onDateChange, origin, destination, onOrigin, onDestination, onPick }: Props) {
   const [date, setDate] = useState(utcNowForInput)
   const [days, setDays] = useState('10')
   const [mass, setMass] = useState('1000')
   const [objective, setObjective] = useState<TransferObjective>('energia')
-  const [missionMode, setMissionMode] = useState<MissionMode>('lunar_transfer')
+  const [selectedMode, setMissionMode] = useState<MissionMode>('lunar_transfer')
   const [orbitAltitudeKm, setOrbitAltitudeKm] = useState('100')
   const [lunarRevolutions, setLunarRevolutions] = useState<1 | 2>(1)
   const [error, setError] = useState('')
+  const missionMode = origin === 'earth' && destination === 'moon' ? selectedMode : 'lunar_transfer'
 
   function submit(event: FormEvent) {
     event.preventDefault()
+    if (origin === destination) return setError('Elige origen y destino distintos.')
     if (!date) return setError('Introduce una fecha de salida UTC válida.')
     const instant = new Date(`${date}:00Z`)
     if (!Number.isFinite(instant.getTime())) return setError('La fecha de salida no es válida.')
@@ -38,11 +41,12 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
     }
 
     const altitude = Number(orbitAltitudeKm)
-    if (missionMode === 'lunar_orbit_return' && (durationDays < 4 || !Number.isFinite(altitude) || altitude < 50 || altitude > 500)) {
+    if (missionMode === 'lunar_orbit_return' && (durationDays < 4 || durationDays > 30 || !Number.isFinite(altitude) || altitude < 50 || altitude > 500)) {
       return setError('Para orbitar y regresar, usa 4 a 30 días y una órbita de 50 a 500 km de altitud.')
     }
     setError('')
     onSubmit({
+      origin_id: origin, destination_id: destination,
       mission_mode: missionMode,
       ...(missionMode === 'lunar_orbit_return' ? { orbit_altitude_km: altitude, lunar_revolutions: lunarRevolutions } : {}),
       date: instant.toISOString(),
@@ -56,9 +60,14 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
   }
 
   return <form className="transfer-form" onSubmit={submit} noValidate>
-    <h2><Icon name="rocket" size={16} />Configura tu misión lunar</h2>
+    <h2><Icon name="rocket" size={16} />Configura tu viaje</h2>
     <p className="form-description">Elige el recorrido, la duración, la masa y el objetivo. La órbita lunar requiere maniobras propulsadas.</p>
-    <fieldset disabled={busy}>
+    <div className="form-row">
+      <label>Origen<select value={origin} disabled={busy} onChange={e => onOrigin(e.target.value)}>{BODIES.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select><button type="button" className="ghost-button" onClick={() => onPick('origin')}>Elegir en el mapa</button></label>
+      <label>Destino<select value={destination} disabled={busy} onChange={e => onDestination(e.target.value)}>{BODIES.map(b => <option key={b.id} value={b.id} disabled={b.id === origin}>{b.name}</option>)}</select><button type="button" className="ghost-button" onClick={() => onPick('destination')}>Elegir en el mapa</button></label>
+    </div>
+    <p className="form-note">Modelo 2D: solo origen y destino ejercen gravedad. El Sol se omite salvo que lo selecciones. Llegada al radio nominal del destino, sin captura orbital.</p>
+    {origin === 'earth' && destination === 'moon' && <fieldset disabled={busy}>
       <legend>Tipo de misión</legend>
       <div className="segmented">
         <button type="button" aria-pressed={missionMode === 'lunar_transfer'} className={missionMode === 'lunar_transfer' ? 'active' : ''}
@@ -66,9 +75,9 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
         <button type="button" aria-pressed={missionMode === 'lunar_orbit_return'} className={missionMode === 'lunar_orbit_return' ? 'active' : ''}
           onClick={() => setMissionMode('lunar_orbit_return')}>Órbita lunar y regreso</button>
       </div>
-    </fieldset>
+    </fieldset>}
     <label>Fecha de salida (UTC)
-      <input type="datetime-local" value={date} onChange={e => {
+      <input id="mission-date" type="datetime-local" value={date} onChange={e => {
         const value = e.target.value
         setDate(value)
         if (value) {
@@ -78,7 +87,7 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
       }} disabled={busy} required />
     </label>
     <label>{missionMode === 'lunar_orbit_return' ? 'Duración máxima (días)' : 'Duración (días)'}
-      <input type="number" min="0.5" max={MAX_DAYS} step="0.5" value={days} onChange={e => setDays(e.target.value)} disabled={busy} required />
+      <input id="mission-duration" type="number" min="0.5" max={MAX_DAYS} step="0.5" value={days} onChange={e => setDays(e.target.value)} disabled={busy} required />
     </label>
     {missionMode === 'lunar_orbit_return' && <>
       <label>Altitud orbital lunar (km)
@@ -109,7 +118,7 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
       ? 'Inserción orbital, una o dos revoluciones y retorno antes del límite de días indicado. La misión termina al entrar en la esfera terrestre de 100.000 km; no se simula reentrada ni aterrizaje.'
       : 'El ángulo de llegada se busca automáticamente entre alternativas válidas. La duración es fija.'}</p>
     <details className="technical-details"><summary>Alcance de la búsqueda</summary>
-      <p>La salida técnica es de 90°. La búsqueda es acotada y no garantiza un óptimo global. Para orbitar y regresar se calculan dos impulsos (captura y salida) sin consumo de combustible modelado; la masa escala la energía, pero no altera trayectorias sin empuje.</p>
+      <p>La salida solar se orienta automáticamente hacia el encuentro estimado; en órbita lunar y regreso es de 90°. La búsqueda es acotada y no garantiza un óptimo global. Para orbitar y regresar se calculan dos impulsos (captura y salida) sin consumo de combustible modelado; la masa escala la energía, pero no altera trayectorias sin empuje.</p>
     </details>
     {error && <p className="form-error" role="alert">{error}</p>}
     {busy
