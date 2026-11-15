@@ -24,6 +24,17 @@ from app.mission.models.domain import CelestialBody, Vec3
 
 _MASTER_STEP_S = 600.0
 _MIN_MASTER_DAYS = 35
+# Filas máximas por tabla maestra. Ventanas lunares (≤ ~138 días) conservan 600 s exactos;
+# las interplanetarias (150–400 días) suben el paso en múltiplos de 600 s.
+_MAX_MASTER_ROWS = 20_000
+
+
+def _master_step_for(span_days: int) -> float:
+    """Paso de la tabla maestra: 600 s salvo ventanas largas, en múltiplos de 600 s."""
+    raw = span_days * 86400.0 / _MAX_MASTER_ROWS
+    if raw <= _MASTER_STEP_S:
+        return _MASTER_STEP_S
+    return math.ceil(raw / _MASTER_STEP_S) * _MASTER_STEP_S
 
 
 class EphemerisError(RuntimeError):
@@ -55,9 +66,9 @@ def _fetch_master_spline(
     window_start_ts: float,
     span_days: int,
 ) -> tuple[float, float, CubicHermiteSpline]:
-    """Descarga una única tabla cada 600 s y construye un spline C1 continuo."""
+    """Descarga una única tabla (600 s, o más en ventanas largas) y construye un spline C1."""
     duration_s = float(span_days * 86400)
-    intervals = int(round(duration_s / _MASTER_STEP_S))
+    intervals = int(round(duration_s / _master_step_for(span_days)))
     start_jd = window_start_ts / 86400.0 + 2440587.5
     stop_jd = (window_start_ts + duration_s) / 86400.0 + 2440587.5
 

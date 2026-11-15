@@ -21,6 +21,7 @@ export default function PlaybackControls({ start, duration, time, playing, speed
     </div>
     <select className="speed-select" value={speed} onChange={e => onSpeed(Number(e.target.value))} aria-label="Velocidad de reproducción">
       <option value={3600}>1 h/s</option><option value={21600}>6 h/s</option><option value={86400}>1 d/s</option>
+      <option value={604800}>7 d/s</option><option value={2592000}>30 d/s</option>
     </select>
   </div>
 }

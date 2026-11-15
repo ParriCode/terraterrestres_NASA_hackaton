@@ -6,6 +6,7 @@ import Icon from './Icon'
 import { getEarthMoonEphemeris, getSunDirection } from '../api/ephemerides'
 import type { EarthMoonEphemeris, SunDirectionEphemeris } from '../api/ephemerides'
 import { projectIcrfKm } from '../utils/icrfProjection'
+import { heliocentricState, keplerOrbit } from '../utils/heliocentric'
 
 type Props = { date: Date; transfer: TransferResponse | null; state: TransferState | null; time: number; visible?: boolean; color?: string }
 type Box = { x: number; y: number; w: number; h: number }
@@ -87,8 +88,29 @@ export default function TransferView({ date, transfer, state, time, visible = tr
     }, 450)
     return () => { window.clearTimeout(timer); controller.abort() }
   }, [dateIso, transfer])
+  const isMars = transfer?.destination === 'mars'
+  // Marte: órbitas completas de Tierra y Marte (elipses de Kepler desde su estado JPL inicial).
+  const orbits = useMemo(() => {
+    if (!transfer || transfer.destination !== 'mars') return null
+    const basis = transfer.basis_icrf
+    const draw = (key: 'earth' | 'mars') => {
+      const st = heliocentricState(transfer.samples, key)
+      return st ? keplerOrbit(st.r, st.v, st.sun).map(p => projectIcrfKm(p, basis)) : []
+    }
+    return { earth: draw('earth'), mars: draw('mars') }
+  }, [transfer])
   const geometry = useMemo(() => {
     const basis = transfer?.basis_icrf
+    if (transfer && orbits && orbits.earth.length && orbits.mars.length) {
+      // Encuadre heliocéntrico: Sol en el centro y ambas órbitas completas dentro de pantalla.
+      const all = [...orbits.earth, ...orbits.mars, ...transfer.samples.map(s => projectIcrfKm(s.position_m, basis))]
+      const sun0 = projectIcrfKm(transfer.samples[0].body_positions_m.sun!, basis)
+      const half = Math.max(...all.map(p => Math.max(Math.abs(p.x - sun0.x), Math.abs(p.y - sun0.y) * W / H))) * 1.12
+      const w = 2 * half, h = w * H / W
+      const track = (key: 'earth' | 'mars') => polyline(transfer.samples.map(s => projectIcrfKm(s.body_positions_m[key]!, basis)))
+      return { earth: track('earth'), moon: '', mars: track('mars'), earthOrbit: polyline(orbits.earth), marsOrbit: polyline(orbits.mars),
+        home: { x: sun0.x - w / 2, y: sun0.y - h / 2, w, h } }
+    }
     const all = transfer ? [
       ...transfer.samples.map(s => projectIcrfKm(s.position_m, basis)),
       ...transfer.samples.map(s => projectIcrfKm(s.body_positions_m.earth, basis)),
@@ -97,7 +119,7 @@ export default function TransferView({ date, transfer, state, time, visible = tr
       projectIcrfKm(preview.body_positions_m.earth),
       projectIcrfKm(preview.body_positions_m.moon),
     ] : []
-    if (!all.length) return { earth: '', moon: '', home: PREVIEW }
+    if (!all.length) return { earth: '', moon: '', mars: '', earthOrbit: '', marsOrbit: '', home: PREVIEW }
     const earth = transfer ? transfer.samples.map(s => projectIcrfKm(s.body_positions_m.earth, basis)) : []
     const moon = transfer ? transfer.samples.map(s => projectIcrfKm(s.body_positions_m.moon, basis)) : []
     const pad = 35000
@@ -105,8 +127,8 @@ export default function TransferView({ date, transfer, state, time, visible = tr
     const minY = Math.min(...all.map(p => p.y)) - pad, maxY = Math.max(...all.map(p => p.y)) + pad
     const scale = Math.max((maxX - minX) / W, (maxY - minY) / H)
     const w = W * scale, h = H * scale
-    return { earth: polyline(earth), moon: polyline(moon), home: { x: (minX + maxX - w) / 2, y: (minY + maxY - h) / 2, w, h } }
-  }, [transfer, preview])
+    return { earth: polyline(earth), moon: polyline(moon), mars: '', earthOrbit: '', marsOrbit: '', home: { x: (minX + maxX - w) / 2, y: (minY + maxY - h) / 2, w, h } }
+  }, [transfer, preview, orbits])
   const viewKey = transfer ?? preview
   const [view, setView] = useState<{ key: TransferResponse | EarthMoonEphemeris | null; box: Box }>({ key: viewKey, box: geometry.home })
   const box = view.key === viewKey ? view.box : geometry.home
@@ -142,7 +164,7 @@ export default function TransferView({ date, transfer, state, time, visible = tr
     return { x: p.x, y: p.y }
   }
   function zoom(factor: number, anchor = { x: box.x + box.w / 2, y: box.y + box.h / 2 }) {
-    const w = clamp(box.w * factor, 1200, geometry.home.w * 5)
+    const w = clamp(box.w * factor, 1200, geometry.home.w * (isMars ? 3 : 5))
     const scale = w / box.w
     setBox({ x: anchor.x - (anchor.x - box.x) * scale, y: anchor.y - (anchor.y - box.y) * scale, w, h: box.h * scale })
   }
@@ -165,6 +187,10 @@ export default function TransferView({ date, transfer, state, time, visible = tr
   const moon = state ? projectIcrfKm(state.moon_m, transfer?.basis_icrf)
     : preview ? projectIcrfKm(preview.body_positions_m.moon) : null
   const ship = state ? projectIcrfKm(state.position_m, transfer?.basis_icrf) : null
+  const sunPos = isMars && state?.sun_m ? projectIcrfKm(state.sun_m, transfer?.basis_icrf) : null
+  const marsPos = isMars && state?.mars_m ? projectIcrfKm(state.mars_m, transfer?.basis_icrf) : null
+  const rMars = (transfer?.bodies.mars?.radius_m ?? 3389500) / 1000
+  const rSun = (transfer?.bodies.sun?.radius_m ?? 695700000) / 1000
   const rEarth = (transfer?.bodies.earth.radius_m ?? 6371000) / 1000
   const rMoon = (transfer?.bodies.moon.radius_m ?? 1737400) / 1000
   const visualEarth = Math.max(rEarth, 21 * unit)
@@ -181,13 +207,18 @@ export default function TransferView({ date, transfer, state, time, visible = tr
       onPointerDown={pointerDown} onPointerMove={pointerMove}
       onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}
       onLostPointerCapture={() => { drag.current = null }} onDragStart={e => e.preventDefault()}
-      role="img" aria-label={transfer ? 'Trayectoria de la nave en proyección ICRF del sistema Tierra–Luna' : 'Posiciones Tierra y Luna consultadas a NASA/JPL cuando están disponibles'}>
+      role="img" aria-label={isMars ? 'Trayectoria Tierra → Marte en marco heliocéntrico con el Sol en el centro' : transfer ? 'Trayectoria de la nave en proyección ICRF del sistema Tierra–Luna' : 'Posiciones Tierra y Luna consultadas a NASA/JPL cuando están disponibles'}>
       <defs><marker id="arrow-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
         <path d="M0,0 L10,5 L0,10 z" fill="#ffbd69" /></marker></defs>
 
+      {isMars && <>
+        <polyline points={geometry.earthOrbit} className="body-track earth-track" strokeWidth={1 * unit} strokeDasharray={`${4 * unit} ${5 * unit}`} opacity={0.55} />
+        <polyline points={geometry.marsOrbit} className="body-track mars-track" strokeWidth={1 * unit} strokeDasharray={`${4 * unit} ${5 * unit}`} opacity={0.55} />
+        <polyline points={geometry.mars} className="body-track mars-track" strokeWidth={1.4 * unit} />
+      </>}
       {transfer && <>
         <polyline points={geometry.earth} className="body-track earth-track" strokeWidth={1.2 * unit} />
-        <polyline points={geometry.moon} className="body-track moon-track" strokeWidth={1.2 * unit} strokeDasharray={`${6 * unit} ${6 * unit}`} />
+        {!isMars && <polyline points={geometry.moon} className="body-track moon-track" strokeWidth={1.2 * unit} strokeDasharray={`${6 * unit} ${6 * unit}`} />}
         {visible && <>
           <path d={segments.future} className="ship-track ship-track-future" stroke={color} strokeWidth={2.4 * unit} strokeDasharray={`${7 * unit} ${9 * unit}`} />
           <path d={segments.past} className="ship-track ship-track-past" stroke={color} strokeWidth={3.2 * unit} />
@@ -195,10 +226,10 @@ export default function TransferView({ date, transfer, state, time, visible = tr
       </>}
       {visible && maneuverPoints.map(point => <g key={point.phase}>
         <circle cx={point.position.x} cy={point.position.y} r={6 * unit} fill="#ffb56b" stroke="#141825" strokeWidth={2 * unit}>
-          <title>{point.phase === 'inserción_orbital' ? 'Inserción en órbita lunar' : 'Maniobra de retorno a la Tierra'}</title>
+          <title>{isMars ? 'Inserción en órbita de Marte (MOI) en el periapsis' : point.phase === 'inserción_orbital' ? 'Inserción en órbita lunar' : 'Maniobra de retorno a la Tierra'}</title>
         </circle>
-        {box.w < 90000 && <text x={point.position.x + 10 * unit} y={point.position.y - 10 * unit}
-          fontSize={12 * unit} className="body-label">{point.phase === 'inserción_orbital' ? 'Inserción orbital' : 'Salida de órbita'}</text>}
+        {(isMars ? box.w < 3e6 : box.w < 90000) && <text x={point.position.x + 10 * unit} y={point.position.y - 10 * unit}
+          fontSize={12 * unit} className="body-label">{isMars ? 'Inserción en Marte (MOI)' : point.phase === 'inserción_orbital' ? 'Inserción orbital' : 'Salida de órbita'}</text>}
       </g>)}
       {earth && <>
         <circle cx={earth.x} cy={earth.y} r={visualEarth * 1.2} className="earth-glow" />
@@ -206,7 +237,19 @@ export default function TransferView({ date, transfer, state, time, visible = tr
         <circle cx={earth.x} cy={earth.y} r={rEarth} fill="none" stroke="#64d9ff" strokeWidth={1.3 * unit} />
         <text x={earth.x} y={earth.y + visualEarth + 20 * unit} fontSize={13 * unit} className="body-label">Tierra</text>
       </>}
-      {moon && <>
+      {sunPos && <>
+        <circle cx={sunPos.x} cy={sunPos.y} r={Math.max(rSun, 30 * unit) * 1.35} className="sun-glow" />
+        <image href="/resource/sol.svg" x={sunPos.x - Math.max(rSun, 30 * unit)} y={sunPos.y - Math.max(rSun, 30 * unit)}
+          width={Math.max(rSun, 30 * unit) * 2} height={Math.max(rSun, 30 * unit) * 2} />
+        <text x={sunPos.x} y={sunPos.y + Math.max(rSun, 30 * unit) + 20 * unit} fontSize={13 * unit} className="body-label">Sol</text>
+      </>}
+      {marsPos && <>
+        <image href="/resource/marte.svg" x={marsPos.x - Math.max(rMars, 17 * unit)} y={marsPos.y - Math.max(rMars, 17 * unit)}
+          width={Math.max(rMars, 17 * unit) * 2} height={Math.max(rMars, 17 * unit) * 2} />
+        <circle cx={marsPos.x} cy={marsPos.y} r={rMars} fill="none" stroke="#ff9a6b" strokeWidth={1.2 * unit} />
+        <text x={marsPos.x} y={marsPos.y + Math.max(rMars, 17 * unit) + 20 * unit} fontSize={13 * unit} className="body-label">Marte</text>
+      </>}
+      {moon && !isMars && <>
         <image href="/resource/luna.svg" x={moon.x - visualMoon} y={moon.y - visualMoon} width={visualMoon * 2} height={visualMoon * 2} />
         <circle cx={moon.x} cy={moon.y} r={rMoon} fill="none" stroke="#dadce5" strokeWidth={1.2 * unit} />
         <text x={moon.x} y={moon.y + visualMoon + 20 * unit} fontSize={13 * unit} className="body-label">Luna</text>
@@ -226,9 +269,9 @@ export default function TransferView({ date, transfer, state, time, visible = tr
           width={shipIconSize} height={shipIconSize} pointerEvents="none" />}
       </>}
     </svg>
-    <div className="scene-heading scene-heading-local"><span className="eyebrow">SISTEMA TIERRA–LUNA</span><h1>{transfer?.mission_mode === 'lunar_orbit_return' ? 'Apolo 11 · Órbita lunar y regreso' : transfer?.mission_mode === 'free_return' ? 'Apolo 8/13 · Retorno libre' : transfer ? 'Trayectoria calculada' : preview ? 'Posición lunar según JPL' : previewError ? 'Efemérides no disponibles' : 'Consultando NASA/JPL…'}</h1>
+    <div className="scene-heading scene-heading-local"><span className="eyebrow">{isMars ? 'SISTEMA SOLAR INTERIOR' : 'SISTEMA TIERRA–LUNA'}</span><h1>{isMars ? 'Tierra → Marte · solo ida' : transfer?.mission_mode === 'lunar_orbit_return' ? 'Apolo 11 · Órbita lunar y regreso' : transfer?.mission_mode === 'free_return' ? 'Apolo 8/13 · Retorno libre' : transfer ? 'Trayectoria calculada' : preview ? 'Posición lunar según JPL' : previewError ? 'Efemérides no disponibles' : 'Consultando NASA/JPL…'}</h1>
       <p>{transfer ? 'La nave sigue las muestras calculadas por el backend.' : previewError || (preview ? `Fecha UTC: ${new Date(preview.date).toLocaleString('es-ES', { timeZone: 'UTC' })}` : 'Descargando las posiciones reales para la fecha seleccionada.')}</p></div>
-    <div className="sun-indicator"
+    {!isMars && <div className="sun-indicator"
       title={sun ? `Dirección Tierra → Sol calculada con JPL Horizons (${sun.date}). Proyección XY; el Sol está fuera de escala.` : sunError || 'Consultando la dirección solar en JPL Horizons'}>
       <img src="/resource/sol.svg" alt="" draggable={false} />
       <span>Sol</span>
@@ -237,14 +280,17 @@ export default function TransferView({ date, transfer, state, time, visible = tr
             <Icon name="arrow" size={17} />
           </span>
         : <span className="sun-indicator__unavailable" aria-label="Dirección solar no disponible">{sunError ? 'Sin datos' : '…'}</span>}
-    </div>
+    </div>}
     <div className="map-tools">
       <button className="icon-button" onClick={() => zoom(.67)} aria-label="Acercar" title="Acercar"><Icon name="plus" /></button>
       <button className="icon-button" onClick={() => zoom(1.5)} aria-label="Alejar" title="Alejar"><Icon name="minus" /></button>
       <button className="icon-button" onClick={() => setBox(geometry.home)} aria-label="Encuadrar" title="Encuadrar"><Icon name="crosshair" /></button>
-      <button className="icon-button" disabled={!moon} onClick={() => { if (moon) setBox({ x: moon.x - 20000, y: moon.y - 12800, w: 40000, h: 25600 }) }}
-        aria-label="Enfocar Luna" title="Enfocar Luna"><Icon name="target" /></button>
+      {isMars
+        ? <button className="icon-button" disabled={!marsPos} onClick={() => { if (marsPos) setBox({ x: marsPos.x - 2e7, y: marsPos.y - 1.28e7, w: 4e7, h: 2.56e7 }) }}
+            aria-label="Enfocar Marte" title="Enfocar Marte"><Icon name="target" /></button>
+        : <button className="icon-button" disabled={!moon} onClick={() => { if (moon) setBox({ x: moon.x - 20000, y: moon.y - 12800, w: 40000, h: 25600 }) }}
+            aria-label="Enfocar Luna" title="Enfocar Luna"><Icon name="target" /></button>}
     </div>
-    <div className="view-legend">{transfer ? 'Tierra–Luna: efemérides JPL, proyección ICRF XY (km); trayectorias 3D proyectadas; iconos ampliados' : preview ? 'Posiciones JPL Horizons: proyección ICRF XY (km); iconos ampliados' : 'Sin posiciones hasta recibir respuesta de JPL'} · Rueda para zoom · Arrastra para mover</div>
+    <div className="view-legend">{isMars ? 'Marco heliocéntrico (posiciones JPL, proyección ICRF XY en km); órbitas completas de Tierra y Marte como elipses de referencia; iconos ampliados' : transfer ? 'Tierra–Luna: efemérides JPL, proyección ICRF XY (km); trayectorias 3D proyectadas; iconos ampliados' : preview ? 'Posiciones JPL Horizons: proyección ICRF XY (km); iconos ampliados' : 'Sin posiciones hasta recibir respuesta de JPL'} · Rueda para zoom · Arrastra para mover</div>
   </div>
 }

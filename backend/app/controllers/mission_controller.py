@@ -20,7 +20,14 @@ from app.services.mission_optimizer import (
 )
 from app.mission.services.propulsion import estimate_propellant
 from app.mission.services.transfer_service import TransferNotFoundError, design_transfer
-from app.mission.transfer_schemas import OptimizedResponse, RoundTripResponse, TransferResponse
+from app.mission.transfer_schemas import MarsResponse, OptimizedResponse, RoundTripResponse, TransferResponse
+from app.services.mars_optimizer import (
+    DEFAULT_ISP_S as MARS_DEFAULT_ISP_S,
+    DEFAULT_MARS_PERIAPSIS_ALT_M,
+    MIN_DURATION_S as MARS_MIN_DURATION_S,
+    NoFeasibleMarsTransfer,
+    optimize_mars_transfer,
+)
 
 router = APIRouter(prefix="/missions", tags=["Transferencias"])
 
@@ -53,10 +60,16 @@ class TransferRequest(BaseModel):
     samples: int = Field(default=200, ge=2, le=4000)
 
 
+MARS_MAX_DURATION_S = 400 * 86400
+
+
 class OptimizeTransferRequest(BaseModel):
     date: AwareDatetime
-    max_duration_s: float = Field(default=10 * 86400, gt=0, le=30 * 86400, allow_inf_nan=False)
+    # "moon" por defecto: las llamadas existentes no cambian. "mars" delega en mars_optimizer.
+    destination: Literal["moon", "mars"] = "moon"
+    max_duration_s: float = Field(default=10 * 86400, gt=0, le=MARS_MAX_DURATION_S, allow_inf_nan=False)
     parking_alt_m: float = Field(default=DEFAULT_PARKING_ALT_M, ge=0, le=50_000_000, allow_inf_nan=False)
+    mars_periapsis_alt_m: float = Field(default=DEFAULT_MARS_PERIAPSIS_ALT_M, ge=50_000, le=50_000_000, allow_inf_nan=False)
     mass_kg: float = Field(default=1000, gt=0, allow_inf_nan=False)
     samples: int = Field(default=200, ge=2, le=4000)
     initial_mass_kg: float | None = Field(default=None, gt=0, allow_inf_nan=False)
@@ -66,6 +79,14 @@ class OptimizeTransferRequest(BaseModel):
     def _validate_propulsion_pair(self):
         if (self.initial_mass_kg is None) != (self.isp_s is None):
             raise ValueError("initial_mass_kg e isp_s deben proporcionarse juntos.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_duration_for_destination(self):
+        if self.destination == "moon" and self.max_duration_s > 30 * 86400:
+            raise ValueError("Para la Luna, max_duration_s debe ser como máximo 30 días.")
+        if self.destination == "mars" and self.max_duration_s < MARS_MIN_DURATION_S:
+            raise ValueError("Para Marte, max_duration_s debe ser de al menos 120 días.")
         return self
 
 
@@ -248,9 +269,11 @@ def transfer(request: TransferRequest):
     }
 
 
-@router.post("/optimize", response_model=OptimizedResponse, dependencies=[Depends(_solver_slot)])
+@router.post("/optimize", response_model=OptimizedResponse | MarsResponse, dependencies=[Depends(_solver_slot)])
 def optimize(request: OptimizeTransferRequest):
-    """Optimiza Δv total Tierra→Luna sujeto a tiempo máximo de vuelo."""
+    """Optimiza Δv total Tierra→Luna (o Tierra→Marte con destination="mars") con tiempo máximo."""
+    if request.destination == "mars":
+        return _optimize_mars(request)
     mass_kg = request.initial_mass_kg if request.initial_mass_kg is not None else request.mass_kg
     try:
         opt = optimize_transfer(
@@ -312,6 +335,73 @@ def optimize(request: OptimizeTransferRequest):
         },
         "samples": _serialize_samples(result, result.t1_s, request.samples),
     }
+
+
+def _optimize_mars(request: OptimizeTransferRequest) -> dict:
+    """Tierra → Marte de solo ida (cónicas parcheadas + N-cuerpos 3D). Mismo formato de muestras."""
+    mass_kg = request.initial_mass_kg if request.initial_mass_kg is not None else request.mass_kg
+    isp_s = request.isp_s if request.isp_s is not None else MARS_DEFAULT_ISP_S
+    try:
+        result = optimize_mars_transfer(
+            request.date, request.max_duration_s, parking_alt_m=request.parking_alt_m,
+            mars_periapsis_alt_m=request.mars_periapsis_alt_m, mass_kg=mass_kg, isp_s=isp_s,
+        )
+    except EphemerisError as error:
+        raise _domain_exception(502, "ephemeris_unavailable", error) from error
+    except NoFeasibleMarsTransfer as error:
+        return {
+            "status": "no_feasible_solution", "destination": "mars", "source": "NASA/JPL Horizons",
+            "date": request.date, "max_duration_s": request.max_duration_s,
+            "min_search_duration_s": MARS_MIN_DURATION_S, "parking_alt_m": request.parking_alt_m,
+            "reasons": error.reasons, "tradeoff": _serialize_tradeoff(error.tradeoff),
+        }
+    except ValueError as error:
+        raise _domain_exception(422, "invalid_transfer", error) from error
+    except (RuntimeError, ArithmeticError) as error:
+        raise _domain_exception(503, "solver_failed", error) from error
+
+    earth = result.scenario.bodies["earth"]
+    v0 = result.speed(0.0)
+    v_rel = float(np.linalg.norm(np.subtract(v0, earth.velocity(0.0))))
+    samples = _serialize_samples(result, result.duration_s, request.samples)
+    path = sum(float(np.linalg.norm(np.subtract(b["position_m"], a["position_m"]))) for a, b in zip(samples, samples[1:]))
+    prop = result.propellant
+    return {
+        "status": "ok", "destination": "mars", "source": "NASA/JPL Horizons", "date": request.date,
+        "frame": result.scenario.frame, "basis_icrf": result.scenario.basis_icrf.tolist(),
+        "objective": "delta_v", "mass_kg": mass_kg, "duration_s": result.duration_s,
+        "max_duration_s": request.max_duration_s, "min_search_duration_s": MARS_MIN_DURATION_S,
+        "parking_alt_m": request.parking_alt_m, "mars_periapsis_alt_m": request.mars_periapsis_alt_m,
+        "initial_velocity_m_s": tuple(v0), "launch_speed_m_s": v_rel,
+        "launch_energy_j": 0.5 * mass_kg * v_rel ** 2,
+        "tli_delta_v_m_s": result.tmi_delta_v_m_s, "launch_delta_v_m_s": result.tmi_delta_v_m_s,
+        "arrival_v_infinity_m_s": result.v_inf_arrival_m_s, "arrival_delta_v_m_s": result.moi_delta_v_m_s,
+        "total_delta_v_m_s": result.total_delta_v_m_s,
+        "estimated_total_delta_v_m_s": result.estimated_total_delta_v_m_s,
+        "min_mars_altitude_m": result.min_mars_altitude_m, "path_length_m": path,
+        "arrival_error_m": result.arrival_error_m,
+        "propellant": {
+            "initial_mass_kg": prop.initial_mass_kg, "isp_s": prop.isp_s,
+            "propellant_mass_kg": prop.propellant_mass_kg, "final_mass_kg": prop.final_mass_kg,
+            "mass_fraction": prop.mass_fraction, "idealized": True,
+        },
+        "tradeoff": _serialize_tradeoff(result.tradeoff),
+        "bodies": {key: {"name": b.name, "radius_m": b.radius_m} for key, b in result.scenario.bodies.items()},
+        "samples": samples,
+    }
+
+
+class MarsTransferRequest(OptimizeTransferRequest):
+    """Mismos campos que /missions/optimize con valores por defecto de Marte."""
+
+    destination: Literal["mars"] = "mars"
+    max_duration_s: float = Field(default=260 * 86400, gt=0, le=MARS_MAX_DURATION_S, allow_inf_nan=False)
+
+
+@router.post("/mars", response_model=MarsResponse, dependencies=[Depends(_solver_slot)])
+def mars(request: MarsTransferRequest):
+    """Endpoint dedicado Tierra → Marte (equivale a /missions/optimize con destination="mars")."""
+    return _optimize_mars(request)
 
 
 def _lunar_orbits_completed(rt) -> float:

@@ -1094,3 +1094,7 @@
   .scene-heading-local { top: 77px; }
   .map-tools { top: 125px; }
 }
+
+/* Marte (solo ida): órbita y estela del planeta, brillo solar en la vista heliocéntrica. */
+.mars-track { fill: none; stroke: #ff9a6b; opacity: .7; }
+.sun-glow { fill: #ffc24d; opacity: .18; }

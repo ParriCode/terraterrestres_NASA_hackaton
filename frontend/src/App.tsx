@@ -57,9 +57,10 @@ export default function App() {
       const result = await requestTransfer(request, signal.signal)
       if (signal.signal.aborted) return
       const id = crypto.randomUUID()
-      const title = `${result.mission_mode === 'lunar_orbit_return' ? 'Apolo 11' : result.mission_mode === 'free_return' ? 'Apolo 8/13' : result.mission_one_way_delta_v_m_s != null ? 'Transferencia directa · ORBITAL4B' : 'Energía mínima'} · ${new Date(result.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`
+      const title = `${result.destination === 'mars' ? 'Tierra → Marte' : result.mission_mode === 'lunar_orbit_return' ? 'Apolo 11' : result.mission_mode === 'free_return' ? 'Apolo 8/13' : result.mission_one_way_delta_v_m_s != null ? 'Transferencia directa · ORBITAL4B' : 'Energía mínima'} · ${new Date(result.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`
       setJourneys(prev => [...prev, { id, title, response: result, color: COLORS[prev.length % COLORS.length], visible: true }])
       setSelectedId(id); setTime(0); setShowForm(false); setShowDrawer(false); setShowResults(true)
+      setSpeed(result.destination === 'mars' ? 604800 : 21600)
     } catch (e) {
       if (signal.signal.aborted) return
       setError(e instanceof ApiError || e instanceof Error ? e.message : 'Error desconocido al calcular la transferencia.')
@@ -71,6 +72,7 @@ export default function App() {
   function cancel() { controller.current?.abort(); controller.current = null; setBusy(false) }
   function selectJourney(id: string) {
     setSelectedId(id); setTime(0); setPlaying(false)
+    setSpeed(journeys.find(j => j.id === id)?.response.destination === 'mars' ? 604800 : 21600)
     setShowDrawer(false); setShowForm(false); setShowResults(true)
   }
   function deleteJourney(id: string) {
@@ -87,7 +89,7 @@ export default function App() {
   return <div className="app-shell">
     <header className="topbar">
       <div className="brand"><span className="brand-logo"><Icon name="orbit" size={24} /></span>
-        <div className="brand-type"><div>ORBITAL<span>4B</span></div><small>EXPLORACIÓN TIERRA–LUNA</small></div></div>
+        <div className="brand-type"><div>ORBITAL<span>4B</span></div><small>EXPLORACIÓN TIERRA–LUNA–MARTE</small></div></div>
       <div className="nav-actions">
         <button type="button" className="nav-button" onClick={() => { setShowForm(true); setShowDrawer(false) }}>
           <Icon name="plus" size={14} /> <span>Nueva misión</span></button>
@@ -125,7 +127,7 @@ export default function App() {
           onToggle={togglePlayback} onReset={() => { setPlaying(false); setTime(0) }}
           onTime={t => { setPlaying(false); setTime(t) }} onSpeed={setSpeed} />
       </div>}
-      <div className="source-disclaimer">{transfer ? 'Tierra–Luna: posiciones de los cuerpos y trayectoria devueltas por el backend. Sol: dirección JPL consultada aparte.' : 'Tierra–Luna: posiciones NASA/JPL Horizons; sin simulación de nave hasta crear una misión.'}</div>
+      <div className="source-disclaimer">{transfer?.destination === 'mars' ? 'Sistema solar interior: posiciones de Sol, Tierra y Marte y trayectoria devueltas por el backend (JPL Horizons).' : transfer ? 'Tierra–Luna: posiciones de los cuerpos y trayectoria devueltas por el backend. Sol: dirección JPL consultada aparte.' : 'Tierra–Luna: posiciones NASA/JPL Horizons; sin simulación de nave hasta crear una misión.'}</div>
     </main>
     {showDrawer && <>
       <button className="drawer-backdrop" aria-label="Cerrar menú de viajes" onClick={() => setShowDrawer(false)} />
@@ -137,7 +139,7 @@ export default function App() {
           : journeys.map(j => <div key={j.id} className={j.id === selectedId ? 'journey-card selected' : 'journey-card'}>
             <button type="button" className="journey-select" onClick={() => selectJourney(j.id)}>
               <span className="journey-dot" style={{ background: j.color }} /><strong>{j.title}</strong><span className="journey-tag">JPL</span>
-              <small>Tierra <Icon name="arrow" size={11} /> Luna{j.response.mission_mode === 'lunar_orbit_return' ? ' (órbita) → Tierra' : j.response.mission_mode === 'free_return' ? ' (sobrevuelo) → Tierra' : ''} · {formatDuration(j.response.duration_s)}</small>
+              <small>Tierra <Icon name="arrow" size={11} /> {j.response.destination === 'mars' ? 'Marte (solo ida)' : 'Luna'}{j.response.mission_mode === 'lunar_orbit_return' ? ' (órbita) → Tierra' : j.response.mission_mode === 'free_return' ? ' (sobrevuelo) → Tierra' : ''} · {formatDuration(j.response.duration_s)}</small>
             </button>
             <div className="journey-actions"><button type="button" title={j.visible ? 'Ocultar ruta' : 'Mostrar ruta'}
               aria-label={j.visible ? `Ocultar ${j.title}` : `Mostrar ${j.title}`}

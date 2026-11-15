@@ -35,6 +35,14 @@ CELESTIAL_BODIES = (
         mass_scale_kg=1e22,
     ),
     HorizonsBodyConfig(
+        id="mars",
+        name="Mars",
+        horizons_id="499",
+        radius_pattern=r"Vol\.\s*mean\s+radius\s*\(km\)\s*=\s*([0-9.]+)",
+        mass_pattern=r"Mass\s*x10\^23\s*\(kg\)\s*=\s*([0-9.]+)",
+        mass_scale_kg=1e23,
+    ),
+    HorizonsBodyConfig(
         id="sun",
         name="Sun",
         horizons_id="10",

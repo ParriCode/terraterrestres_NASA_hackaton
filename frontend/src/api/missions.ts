@@ -1,7 +1,7 @@
 /** Adaptador del motor de misiones 3D al contrato de visualización existente.
  * No integra la nave en React: todas las muestras proceden del backend.
  */
-import type { TransferRequest, TransferResponse, TransferSample, Vec3 } from '../types/transfer'
+import type { TradeoffPoint, TransferBody, TransferRequest, TransferResponse, TransferSample, Vec3 } from '../types/transfer'
 import { API_BASE_URL, ApiError } from './transfers'
 
 type RawRoundTrip = {
@@ -227,5 +227,97 @@ export async function requestOptimizedOutbound(form: TransferRequest, signal?: A
     mission_one_way_delta_v_m_s: data.total_delta_v_m_s,
     model_limitations: ['ORBITAL4B optimiza Δv, no minimiza exactamente la energía ni la distancia.',
       'La duración es un máximo, no una fecha de llegada fija.', 'Búsqueda acotada sin garantía de óptimo global.'],
+  }
+}
+
+// --------------------------------------------------------------------------- Tierra → Marte
+
+type RawMarsTransfer = {
+  status: 'ok'; destination: 'mars'; source: string; date: string
+  frame: 'earth_moon_barycentric_orbital_3d'; basis_icrf: number[][]
+  mass_kg: number; duration_s: number; max_duration_s: number
+  parking_alt_m: number; mars_periapsis_alt_m: number
+  initial_velocity_m_s: Vec3; launch_speed_m_s: number; launch_energy_j: number
+  tli_delta_v_m_s: number; arrival_v_infinity_m_s: number; arrival_delta_v_m_s: number
+  total_delta_v_m_s: number; estimated_total_delta_v_m_s: number
+  min_mars_altitude_m: number; path_length_m: number; arrival_error_m: number
+  propellant: { initial_mass_kg: number; isp_s: number; propellant_mass_kg: number; final_mass_kg: number; mass_fraction: number }
+  tradeoff: TradeoffPoint[]
+  bodies: { earth: TransferBody; moon: TransferBody; sun: TransferBody; mars: TransferBody }
+  samples: TransferSample[]
+}
+
+function validMars(x: unknown): x is RawMarsTransfer {
+  if (!x || typeof x !== 'object') return false
+  const r = x as Partial<RawMarsTransfer>
+  return r.status === 'ok' && r.destination === 'mars' && r.frame === 'earth_moon_barycentric_orbital_3d'
+    && !!r.date && !!r.source
+    && [r.duration_s, r.tli_delta_v_m_s, r.arrival_delta_v_m_s, r.total_delta_v_m_s, r.min_mars_altitude_m,
+      r.launch_speed_m_s, r.launch_energy_j, r.path_length_m, r.arrival_error_m].every(finite)
+    && vec3(r.initial_velocity_m_s)
+    && Array.isArray(r.basis_icrf) && r.basis_icrf.length === 3
+    && r.basis_icrf.every(axis => axis.length === 3 && axis.every(finite))
+    && ['earth', 'moon', 'sun', 'mars'].every(k => finite(r.bodies?.[k as 'earth']?.radius_m))
+    && !!r.propellant && finite(r.propellant.propellant_mass_kg) && Array.isArray(r.tradeoff)
+    && Array.isArray(r.samples) && r.samples.length >= 2
+    && r.samples.every((s, i) => finite(s.t_s) && (i === 0 || s.t_s > r.samples![i - 1].t_s)
+      && vec3(s.position_m) && vec3(s.velocity_m_s)
+      && vec3(s.body_positions_m.earth) && vec3(s.body_positions_m.moon)
+      && vec3(s.body_positions_m.sun) && vec3(s.body_positions_m.mars))
+}
+
+/** Tierra → Marte de solo ida: cribado Lambert heliocéntrico + propagación N-cuerpos 3D. */
+export async function requestMarsTransfer(form: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
+  const url = `${API_BASE_URL}/missions/mars`
+  const timeout = AbortSignal.timeout(10 * 60_000)
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        date: form.date, destination: 'mars', max_duration_s: form.duration_s, mass_kg: form.mass_kg,
+        samples: form.samples, mars_periapsis_alt_m: (form.mars_periapsis_alt_km ?? 300) * 1000,
+      }),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    })
+  } catch (error) {
+    if (signal?.aborted) throw error
+    if (timeout.aborted) throw new ApiError(0, 'La transferencia a Marte excedió el tiempo de espera (10 min).')
+    throw new ApiError(0, `No fue posible conectar con ${url}. Comprueba que el backend está arrancado.`)
+  }
+  const data: unknown = await response.json().catch(() => null)
+  if (!response.ok) {
+    const detail = (data as { detail?: unknown } | null)?.detail
+    const message = typeof detail === 'string' ? detail
+      : (detail as { message?: string } | undefined)?.message
+        ?? (Array.isArray(detail) ? detail.map(d => (d as { msg?: string }).msg).join(' · ') : JSON.stringify(detail ?? data))
+    if (response.status === 404 || response.status === 405) throw new ApiError(response.status, `El endpoint ${url} no existe: reinicia FastAPI con el backend actualizado.`)
+    throw new ApiError(response.status, `No se pudo calcular la transferencia a Marte: ${message}`)
+  }
+  if (data && typeof data === 'object' && (data as { status?: string }).status === 'no_feasible_solution') {
+    throw new ApiError(422, `No se encontró una transferencia a Marte viable en esta ventana: ${((data as { reasons?: string[] }).reasons ?? []).join(' · ') || 'sin candidatos'}. Prueba otra fecha de salida u otra duración.`)
+  }
+  if (!validMars(data)) throw new ApiError(0, 'Respuesta de /missions/mars incompatible.')
+  const arrival = data.duration_s
+  return {
+    destination: 'mars',
+    source: data.source, date: data.date, frame: data.frame, basis_icrf: data.basis_icrf,
+    objective: 'energia', mass_kg: data.mass_kg,
+    initial_velocity_m_s: data.initial_velocity_m_s, launch_speed_m_s: data.launch_speed_m_s,
+    launch_energy_j: data.launch_energy_j, path_length_m: data.path_length_m,
+    arrival_error_m: data.arrival_error_m, arrival_angle_deg: null,
+    duration_s: data.duration_s, requested_duration_s: form.duration_s,
+    bodies: data.bodies, samples: data.samples,
+    maneuvers: [{ phase: 'inserción_orbital', t_s: arrival, delta_v_m_s: data.arrival_delta_v_m_s }],
+    mars_mission: {
+      tmi_delta_v_m_s: data.tli_delta_v_m_s, moi_delta_v_m_s: data.arrival_delta_v_m_s,
+      total_delta_v_m_s: data.total_delta_v_m_s, estimated_total_delta_v_m_s: data.estimated_total_delta_v_m_s,
+      arrival_v_infinity_m_s: data.arrival_v_infinity_m_s, min_mars_altitude_km: data.min_mars_altitude_m / 1000,
+      mars_periapsis_alt_km: data.mars_periapsis_alt_m / 1000, parking_alt_km: data.parking_alt_m / 1000,
+      propellant: data.propellant, tradeoff: data.tradeoff,
+    },
+    model_limitations: ['Cribado con cónicas parcheadas (Lambert heliocéntrico) y validación N-cuerpos 3D (Sol, Tierra, Luna, Marte) con DOP853.',
+      'Δv impulsivos ideales: TMI desde LEO circular y MOI en el periapsis marciano; sin pérdidas gravitatorias ni de dirección.',
+      'Propelente estimado con Tsiolkovski para la Isp indicada; búsqueda acotada sin garantía de óptimo global.'],
   }
 }
