@@ -6,6 +6,7 @@ import PlaybackControls from './components/PlaybackControls'
 import TransferForm from './components/TransferForm'
 import TransferSummary from './components/TransferSummary'
 import TransferView from './components/TransferView'
+import type { ViewMode } from './components/TransferView'
 import type { TransferRequest, TransferResponse } from './types/transfer'
 import { formatDuration, formatUtc, stateAt } from './utils/transfer'
 
@@ -25,6 +26,14 @@ export default function App() {
   const [speed, setSpeed] = useState(21600)
   const controller = useRef<AbortController | null>(null)
   const [previewDate, setPreviewDate] = useState(() => new Date())
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    try { return window.localStorage.getItem('orbital4b-view-mode') === '2d' ? '2d' : '3d' }
+    catch { return '3d' }
+  })
+  function changeView(mode: ViewMode) {
+    setViewMode(mode)
+    try { window.localStorage.setItem('orbital4b-view-mode', mode) } catch { /* modo temporal */ }
+  }
 
   const selected = journeys.find(j => j.id === selectedId) ?? null
   const transfer = selected?.response ?? null
@@ -100,7 +109,13 @@ export default function App() {
     </header>
     <main className="stage">
       <TransferView date={sceneDate} transfer={transfer} state={state} time={time}
-        visible={selected?.visible ?? false} color={selected?.color} />
+        visible={selected?.visible ?? false} color={selected?.color} mode={viewMode} />
+      <div className="scene-nav scene-switch" role="group" aria-label="Cambiar entre visor 2D y 3D">
+        <button type="button" className={`scene-tab ${viewMode === '2d' ? 'active' : ''}`}
+          aria-pressed={viewMode === '2d'} onClick={() => changeView('2d')}>2D · Mapa</button>
+        <button type="button" className={`scene-tab ${viewMode === '3d' ? 'active' : ''}`}
+          aria-pressed={viewMode === '3d'} onClick={() => changeView('3d')}>3D · Espacio</button>
+      </div>
       {showForm && <div className="mission-panel panel-surface" aria-label="Configuración de transferencia">
         <button className="panel-close" type="button" onClick={() => setShowForm(false)} aria-label="Cerrar formulario"><Icon name="x" size={16} /></button>
         <TransferForm busy={busy} onSubmit={calculate} onCancel={cancel} onDateChange={setPreviewDate} />
@@ -125,7 +140,7 @@ export default function App() {
           onToggle={togglePlayback} onReset={() => { setPlaying(false); setTime(0) }}
           onTime={t => { setPlaying(false); setTime(t) }} onSpeed={setSpeed} />
       </div>}
-      <div className="source-disclaimer">{transfer ? 'Tierra–Luna: posiciones de los cuerpos y trayectoria devueltas por el backend. Sol: dirección JPL consultada aparte.' : 'Tierra–Luna: posiciones NASA/JPL Horizons; sin simulación de nave hasta crear una misión.'}</div>
+      <div className="source-disclaimer">{transfer ? `Visor ${viewMode.toUpperCase()}: trayectorias del backend, Sol: dirección NASA/JPL.` : `Visor ${viewMode.toUpperCase()}: posiciones NASA/JPL Horizons. La nave aparece tras calcular una misión.`}</div>
     </main>
     {showDrawer && <>
       <button className="drawer-backdrop" aria-label="Cerrar menú de viajes" onClick={() => setShowDrawer(false)} />
