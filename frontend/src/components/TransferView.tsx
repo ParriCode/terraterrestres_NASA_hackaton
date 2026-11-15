@@ -100,6 +100,10 @@ export default function TransferView({ date, transfer, state, time, visible = tr
     return { past: makePath([...past, now], transfer.basis_icrf), future: makePath([now, ...future], transfer.basis_icrf) }
   }, [transfer, state, time])
 
+  const earthEntry = transfer?.earth_entry?.validated && transfer.samples.length
+    ? projectIcrfKm(transfer.samples[transfer.samples.length - 1].position_m, transfer.basis_icrf)
+    : null
+
   const maneuverPoints = transfer?.maneuvers?.map(m => ({
     phase: m.phase, position: projectIcrfKm(stateAt(transfer.samples, m.t_s).position_m, transfer.basis_icrf),
   })) ?? []
@@ -151,7 +155,7 @@ export default function TransferView({ date, transfer, state, time, visible = tr
       onPointerDown={pointerDown} onPointerMove={pointerMove}
       onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }}
       onLostPointerCapture={() => { drag.current = null }} onDragStart={e => e.preventDefault()}
-      role="img" aria-label={transfer ? 'Trayectoria científica Tierra–Luna en plano baricéntrico' : 'Vista ilustrativa de Tierra y Luna'}>
+      role="img" aria-label={transfer ? 'Trayectoria de la nave en proyección ICRF del sistema Tierra–Luna' : 'Vista ilustrativa de Tierra y Luna'}>
       <defs><marker id="arrow-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
         <path d="M0,0 L10,5 L0,10 z" fill="#ffbd69" /></marker></defs>
 
@@ -181,6 +185,13 @@ export default function TransferView({ date, transfer, state, time, visible = tr
         <circle cx={moon.x} cy={moon.y} r={rMoon} fill="none" stroke="#dadce5" strokeWidth={1.2 * unit} />
         <text x={moon.x} y={moon.y + visualMoon + 20 * unit} fontSize={13 * unit} className="body-label">Luna</text>
       </>}
+      {visible && earthEntry && <g>
+        <circle cx={earthEntry.x} cy={earthEntry.y} r={8 * unit} fill="#68f1ba" stroke="#071523" strokeWidth={2 * unit}>
+          <title>Llegada a la Tierra: interfaz atmosférica a 120 km de altitud (sin aterrizaje simulado)</title>
+        </circle>
+        {box.w < 130000 && <text x={earthEntry.x + 12 * unit} y={earthEntry.y - 12 * unit}
+          className="body-label" fontSize={12 * unit}>Llegada a la Tierra</text>}
+      </g>}
       {visible && ship && <>
         {velocity && arrow > 0 && <line x1={ship.x} y1={ship.y} x2={ship.x + velocity.x * arrow} y2={ship.y + velocity.y * arrow}
           stroke="#ffbd69" strokeWidth={1.7 * unit} markerEnd="url(#arrow-head)" />}
@@ -189,7 +200,7 @@ export default function TransferView({ date, transfer, state, time, visible = tr
           width={shipIconSize} height={shipIconSize} pointerEvents="none" />}
       </>}
     </svg>
-    <div className="scene-heading scene-heading-local"><span className="eyebrow">SISTEMA TIERRA–LUNA</span><h1>{transfer?.mission_mode === 'lunar_orbit_return' ? 'Órbita lunar y regreso' : transfer ? 'Trayectoria calculada' : preview ? 'Posición lunar según JPL' : previewError ? 'Efemérides no disponibles' : 'Consultando NASA/JPL…'}</h1>
+    <div className="scene-heading scene-heading-local"><span className="eyebrow">SISTEMA TIERRA–LUNA</span><h1>{transfer?.mission_mode === 'lunar_orbit_return' ? 'Órbita lunar y regreso' : transfer?.mission_mode === 'free_return' ? 'Sobrevuelo y retorno libre' : transfer ? 'Trayectoria calculada' : preview ? 'Posición lunar según JPL' : previewError ? 'Efemérides no disponibles' : 'Consultando NASA/JPL…'}</h1>
       <p>{transfer ? 'La nave sigue las muestras calculadas por el backend.' : previewError || (preview ? `Fecha UTC: ${new Date(preview.date).toLocaleString('es-ES', { timeZone: 'UTC' })}` : 'Descargando las posiciones reales para la fecha seleccionada.')}</p></div>
     <div className="map-tools">
       <button className="icon-button" onClick={onSolar} aria-label="Volver al sistema solar" title="Volver al sistema solar"><Icon name="back" /></button>
@@ -199,6 +210,6 @@ export default function TransferView({ date, transfer, state, time, visible = tr
       <button className="icon-button" disabled={!moon} onClick={() => { if (moon) setBox({ x: moon.x - 20000, y: moon.y - 12800, w: 40000, h: 25600 }) }}
         aria-label="Enfocar Luna" title="Enfocar Luna"><Icon name="target" /></button>
     </div>
-    <div className="view-legend">{transfer ? 'Tierra–Luna: efemérides JPL, proyección ICRF XY (km); iconos ampliados' : preview ? 'Posiciones JPL Horizons: proyección ICRF XY (km); iconos ampliados' : 'Sin posiciones hasta recibir respuesta de JPL'} · Rueda para zoom · Arrastra para mover</div>
+    <div className="view-legend">{transfer ? 'Tierra–Luna: efemérides JPL, proyección ICRF XY (km); trayectorias 3D proyectadas; iconos ampliados' : preview ? 'Posiciones JPL Horizons: proyección ICRF XY (km); iconos ampliados' : 'Sin posiciones hasta recibir respuesta de JPL'} · Rueda para zoom · Arrastra para mover</div>
   </div>
 }

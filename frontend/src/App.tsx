@@ -60,7 +60,7 @@ export default function App() {
       const result = await requestTransfer(request, signal.signal)
       if (signal.signal.aborted) return
       const id = crypto.randomUUID()
-      const title = `${result.mission_mode === 'lunar_orbit_return' ? 'Órbita lunar + retorno' : (result.objective === 'energia' ? 'Energía mínima' : 'Distancia mínima')} · ${new Date(result.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`
+      const title = `${result.mission_mode === 'lunar_orbit_return' ? 'Órbita lunar + retorno' : result.mission_mode === 'free_return' ? 'Retorno libre' : result.li_one_way_delta_v_m_s != null ? 'Menor Δv · Li' : (result.objective === 'energia' ? 'Energía mínima' : 'Distancia mínima')} · ${new Date(result.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`
       setJourneys(prev => [...prev, { id, title, response: result, color: COLORS[prev.length % COLORS.length], visible: true }])
       setSelectedId(id); setTime(0); setScene('earth'); setShowForm(false); setShowDrawer(false); setShowResults(true)
     } catch (e) {
@@ -149,7 +149,7 @@ export default function App() {
           : journeys.map(j => <div key={j.id} className={j.id === selectedId ? 'journey-card selected' : 'journey-card'}>
             <button type="button" className="journey-select" onClick={() => selectJourney(j.id)}>
               <span className="journey-dot" style={{ background: j.color }} /><strong>{j.title}</strong><span className="journey-tag">JPL</span>
-              <small>Tierra <Icon name="arrow" size={11} /> Luna{j.response.mission_mode === 'lunar_orbit_return' ? ' (órbita) → Tierra' : ''} · {formatDuration(j.response.duration_s)}</small>
+              <small>Tierra <Icon name="arrow" size={11} /> Luna{j.response.mission_mode === 'lunar_orbit_return' ? ' (órbita) → Tierra' : j.response.mission_mode === 'free_return' ? ' → Tierra (libre)' : ''} · {formatDuration(j.response.duration_s)}</small>
             </button>
             <div className="journey-actions"><button type="button" title={j.visible ? 'Ocultar ruta' : 'Mostrar ruta'}
               aria-label={j.visible ? `Ocultar ${j.title}` : `Mostrar ${j.title}`}

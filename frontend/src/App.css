@@ -1054,3 +1054,6 @@
         transition-duration: .01ms !important
     }
 }
+/* Tres estrategias sin romper los controles de objetivos de dos columnas. */
+.segmented.mission-modes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.segmented.mission-modes button { white-space: normal; min-height: 42px; }

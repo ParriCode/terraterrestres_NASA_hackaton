@@ -8,12 +8,12 @@ export type BasisICRF = [number[], number[]]
 
 export function projectIcrfKm(vector: readonly number[], basis?: number[][]): PointKm {
   if (basis) {
-    if (basis.length !== 2 || basis.some(axis => axis.length !== 3 || axis.some(v => !Number.isFinite(v)))) {
+    if (![2, 3].includes(basis.length) || basis.some(axis => axis.length !== 3 || axis.some(v => !Number.isFinite(v)))) {
       throw new Error('El backend devolvió una base ICRF inválida.')
     }
     return {
-      x: (vector[0] * basis[0][0] + vector[1] * basis[1][0]) / 1000,
-      y: -(vector[0] * basis[0][1] + vector[1] * basis[1][1]) / 1000,
+      x: (vector[0] * basis[0][0] + vector[1] * basis[1][0] + (basis.length === 3 ? vector[2] * basis[2][0] : 0)) / 1000,
+      y: -(vector[0] * basis[0][1] + vector[1] * basis[1][1] + (basis.length === 3 ? vector[2] * basis[2][1] : 0)) / 1000,
     }
   }
   // La vista previa ya está expresada en ICRF sin rotar.
