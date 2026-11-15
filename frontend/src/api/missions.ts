@@ -1,4 +1,4 @@
-/** Adaptador P4: motor 3D de Li -> contrato de visualización existente.
+/** Adaptador del motor de misiones 3D al contrato de visualización existente.
  * No integra la nave en React: todas las muestras proceden del backend.
  */
 import type { TransferRequest, TransferResponse, TransferSample, Vec3 } from '../types/transfer'
@@ -54,11 +54,11 @@ function validTrip(raw: unknown): raw is RawRoundTrip {
     && finite(r.total_duration_s) && Math.abs(r.samples[r.samples.length - 1].t_s - r.total_duration_s) < 1
 }
 
-export async function requestLiRoundTrip(
+export async function requestRoundTripMission(
   form: TransferRequest, signal?: AbortSignal,
 ): Promise<TransferResponse> {
   const mode = form.mission_mode === 'free_return' ? 'free_return' : 'lunar_orbit'
-  const url = `${API_BASE_URL}/li-transfers/round-trip`
+  const url = `${API_BASE_URL}/missions/round-trip`
   const timeout = AbortSignal.timeout(10 * 60_000)
   const payload = {
     date: form.date,
@@ -67,7 +67,7 @@ export async function requestLiRoundTrip(
     max_total_duration_s: form.duration_s,
     lunar_periapsis_alt_m: (form.orbit_altitude_km ?? 150) * 1000,
     reentry_alt_m: 120000,
-    samples: Math.max(500, form.samples),
+    samples: Math.min(4000, Math.max(500, form.samples, 200 + 18 * (form.lunar_revolutions ?? 1))),
     ...(mode === 'lunar_orbit' ? { lunar_revolutions: form.lunar_revolutions ?? 1 } : {}),
   }
   let response: Response
@@ -79,20 +79,20 @@ export async function requestLiRoundTrip(
     })
   } catch (error) {
     if (signal?.aborted) throw error
-    if (timeout.aborted) throw new ApiError(0, 'El optimizador de Li superó el límite de espera de 10 minutos.')
+    if (timeout.aborted) throw new ApiError(0, 'El optimizador de misiones superó el límite de espera de 10 minutos.')
     throw new ApiError(0, `No se pudo conectar con ${url}. Comprueba que FastAPI está arrancado.`)
   }
   const data: unknown = await response.json().catch(() => null)
   if (!response.ok) {
     const d = (data as { detail?: unknown } | null)?.detail
     const message = typeof d === 'string' ? d : JSON.stringify(d ?? response.statusText)
-    throw new ApiError(response.status, `Motor de Li (HTTP ${response.status}): ${message}`)
+    throw new ApiError(response.status, `Motor orbital (HTTP ${response.status}): ${message}`)
   }
   if (data && typeof data === 'object' && (data as { status?: string }).status === 'no_feasible_solution') {
     const reasons = (data as { reasons?: string[] }).reasons ?? []
-    throw new ApiError(422, `Li no encontró una trayectoria validada en esta ventana: ${reasons.join(' · ') || 'sin candidato'}. Prueba otra fecha o duración.`)
+    throw new ApiError(422, `No se encontró una trayectoria validada en esta ventana: ${reasons.join(' · ') || 'sin candidato'}. Prueba otra fecha o duración.`)
   }
-  if (!validTrip(data)) throw new ApiError(0, 'La respuesta 3D de Li no confirma una trayectoria completa de regreso o no cumple el contrato.')
+  if (!validTrip(data)) throw new ApiError(0, 'La respuesta 3D de la misión no confirma una trayectoria completa de regreso o no cumple el contrato.')
 
   const samples = data.samples
   const distance = samples.reduce((sum, sample, i) => {
@@ -126,7 +126,7 @@ export async function requestLiRoundTrip(
     samples,
     maneuvers,
     total_maneuver_delta_v_m_s: data.loi_delta_v_m_s + data.tei_delta_v_m_s,
-    li_mission: {
+    mission_solution: {
       mode: data.mode,
       total_delta_v_m_s: data.total_delta_v_m_s,
       tli_delta_v_m_s: data.tli_delta_v_m_s,
@@ -155,7 +155,7 @@ export async function requestLiRoundTrip(
       return_arrival_direction_deg: null,
       verified_return: true,
     } } : {}),
-    model_limitations: ['Propagación de misión según Li: solve_ivp/SciPy, no RK2.',
+    model_limitations: ['Propagación de misión con SciPy: solve_ivp/SciPy, no RK2.',
       'Llegada a 120 km de altitud; no se simulan atmósfera, reentrada ni aterrizaje.',
       'Búsqueda acotada; no garantiza el óptimo global.'],
   }
@@ -194,8 +194,8 @@ function validOutbound(x: unknown): x is RawOptimizedOneWay {
       && vec3(s.body_positions_m.earth) && vec3(s.body_positions_m.moon))
 }
 
-export async function requestLiOutbound(form: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
-  const url = `${API_BASE_URL}/li-transfers/optimize`
+export async function requestOptimizedOutbound(form: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
+  const url = `${API_BASE_URL}/missions/optimize`
   const timeout = AbortSignal.timeout(10 * 60_000)
   let response: Response
   try {
@@ -207,17 +207,17 @@ export async function requestLiOutbound(form: TransferRequest, signal?: AbortSig
     })
   } catch (error) {
     if (signal?.aborted) throw error
-    if (timeout.aborted) throw new ApiError(0, 'La transferencia de Li excedió el tiempo de espera.')
+    if (timeout.aborted) throw new ApiError(0, 'La transferencia orbital excedió el tiempo de espera.')
     throw new ApiError(0, `No fue posible conectar con ${url}.`)
   }
   const data: unknown = await response.json().catch(() => null)
   if (!response.ok) {
-    throw new ApiError(response.status, `No se pudo ejecutar el optimizador de Li: ${JSON.stringify((data as { detail?: unknown } | null)?.detail ?? data)}`)
+    throw new ApiError(response.status, `No se pudo ejecutar el optimizador de misiones: ${JSON.stringify((data as { detail?: unknown } | null)?.detail ?? data)}`)
   }
   if (data && typeof data === 'object' && (data as { status?: string }).status === 'no_feasible_solution') {
-    throw new ApiError(422, `Li no encontró una transferencia viable: ${((data as { reasons?: string[] }).reasons ?? []).join(' · ')}`)
+    throw new ApiError(422, `No se encontró una transferencia viable: ${((data as { reasons?: string[] }).reasons ?? []).join(' · ')}`)
   }
-  if (!validOutbound(data)) throw new ApiError(0, 'Respuesta de optimización unidireccional de Li incompatible.')
+  if (!validOutbound(data)) throw new ApiError(0, 'Respuesta de optimización unidireccional de la misión incompatible.')
   return {
     source: data.source, date: data.date, frame: data.frame,
     basis_icrf: data.basis_icrf, objective: 'energia', mass_kg: form.mass_kg,
@@ -226,8 +226,8 @@ export async function requestLiOutbound(form: TransferRequest, signal?: AbortSig
     arrival_error_m: data.arrival_error_m, arrival_angle_deg: data.arrival_angle_deg,
     duration_s: data.duration_s, requested_duration_s: form.duration_s,
     bodies: data.bodies, samples: data.samples,
-    li_one_way_delta_v_m_s: data.total_delta_v_m_s,
-    model_limitations: ['Li optimiza Δv, no minimiza exactamente la energía ni la distancia.',
+    mission_one_way_delta_v_m_s: data.total_delta_v_m_s,
+    model_limitations: ['ORBITAL4B optimiza Δv, no minimiza exactamente la energía ni la distancia.',
       'La duración es un máximo, no una fecha de llegada fija.', 'Búsqueda acotada sin garantía de óptimo global.'],
   }
 }

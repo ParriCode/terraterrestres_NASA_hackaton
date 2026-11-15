@@ -1,4 +1,4 @@
-"""Contratos de respuesta para los tres endpoints /transfers (unidades SI)."""
+"""Contratos de respuesta para los endpoints de misiones (unidades SI)."""
 
 from typing import Literal
 

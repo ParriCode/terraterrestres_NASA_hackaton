@@ -9,10 +9,10 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import brentq, least_squares, minimize_scalar
 
-from app.li_engine.data.scenarios import PlanarScenario, SpatialScenario
-from app.li_engine.models.domain import SpacecraftState, Vec3
-from app.li_engine.physics.lambert import LambertError, solve_lambert
-from app.li_engine.services.transfer_service import (
+from app.mission.data.scenarios import PlanarScenario, SpatialScenario
+from app.mission.models.domain import SpacecraftState, Vec3
+from app.mission.physics.lambert import LambertError, solve_lambert
+from app.mission.services.transfer_service import (
     F,
     TransferNotFoundError,
     TransferResult,

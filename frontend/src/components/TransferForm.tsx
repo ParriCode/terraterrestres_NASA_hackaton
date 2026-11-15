@@ -19,7 +19,7 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
   const [objective, setObjective] = useState<TransferObjective>('energia')
   const [missionMode, setMissionMode] = useState<MissionMode>('lunar_transfer')
   const [orbitAltitudeKm, setOrbitAltitudeKm] = useState('100')
-  const [lunarRevolutions, setLunarRevolutions] = useState<1 | 2>(1)
+  const [lunarRevolutions, setLunarRevolutions] = useState('1')
   const [error, setError] = useState('')
   const isReturn = missionMode !== 'lunar_transfer'
 
@@ -33,7 +33,7 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
     if (!days.trim() || !Number.isFinite(durationDays) || durationDays <= 0 || durationDays > (isReturn ? 35 : MAX_DAYS)) {
       return setError(`La duración debe ser mayor que 0 y como máximo ${isReturn ? 35 : MAX_DAYS} días.`)
     }
-    if (isReturn && durationDays < 6) return setError('Para un retorno, introduce al menos 6 días; la búsqueda de Li requiere una ventana suficiente.')
+    if (isReturn && durationDays < 6) return setError('Para un retorno, introduce al menos 6 días; la búsqueda necesita una ventana suficiente.')
     const massKg = Number(mass)
     if (!mass.trim() || !Number.isFinite(massKg) || massKg <= 0) {
       return setError('La masa debe ser un número positivo en kg.')
@@ -43,17 +43,21 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
     if (missionMode === 'lunar_orbit_return' && (durationDays < 4 || !Number.isFinite(altitude) || altitude < 50 || altitude > 500)) {
       return setError('Para orbitar y regresar, usa al menos 6 días y una órbita de 50 a 500 km de altitud.')
     }
+    const revolutions = Number(lunarRevolutions)
+    if (missionMode === 'lunar_orbit_return' && (!lunarRevolutions.trim() ||
+      !Number.isSafeInteger(revolutions) || revolutions < 1 || revolutions > 100)) {
+      return setError('Introduce un número entero de vueltas lunares entre 1 y 100.')
+    }
     setError('')
     onSubmit({
       mission_mode: missionMode,
-      ...(missionMode === 'lunar_orbit_return' ? { orbit_altitude_km: altitude, lunar_revolutions: lunarRevolutions } : {}),
+      ...(missionMode === 'lunar_orbit_return' ? { orbit_altitude_km: altitude, lunar_revolutions: revolutions } : {}),
       date: instant.toISOString(),
       duration_s: durationDays * SECONDS_PER_DAY,
       launch_angle_deg: FIXED_LAUNCH_ANGLE_DEG,
       objective: isReturn ? 'energia' : objective,
       mass_kg: massKg,
       samples: SAMPLES,
-      // NO enviamos arrival_angle_deg: el endpoint optimizado debe buscarlo.
     })
   }
 
@@ -68,7 +72,7 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
         <button type="button" aria-pressed={missionMode === 'free_return'} className={missionMode === 'free_return' ? 'active' : ''}
           onClick={() => { setMissionMode('free_return'); setObjective('energia') }}>Apolo 8/13</button>
         <button type="button" aria-pressed={missionMode === 'lunar_orbit_return'} className={missionMode === 'lunar_orbit_return' ? 'active' : ''}
-          onClick={() => { setMissionMode('lunar_orbit_return'); setObjective('energia') }}>Apolo 11/Artemis</button>
+          onClick={() => { setMissionMode('lunar_orbit_return'); setObjective('energia') }}>Apolo 11</button>
       </div>
     </fieldset>
     <label>Fecha de salida (UTC)
@@ -89,13 +93,12 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
         <input type="number" min="50" max="500" step="10" value={orbitAltitudeKm}
           onChange={e => setOrbitAltitudeKm(e.target.value)} disabled={busy} required />
       </label>
-      <fieldset disabled={busy}>
-        <legend>Vueltas a la Luna</legend>
-        <div className="segmented">
-          <button type="button" className={lunarRevolutions === 1 ? 'active' : ''} aria-pressed={lunarRevolutions === 1} onClick={() => setLunarRevolutions(1)}>1 vuelta</button>
-          <button type="button" className={lunarRevolutions === 2 ? 'active' : ''} aria-pressed={lunarRevolutions === 2} onClick={() => setLunarRevolutions(2)}>2 vueltas</button>
-        </div>
-      </fieldset>
+      <label>Vueltas alrededor de la Luna
+        <input type="number" inputMode="numeric" min="1" max="100" step="1"
+          value={lunarRevolutions} onChange={e => setLunarRevolutions(e.target.value)}
+          disabled={busy} required />
+        <small className="form-help">El simulador comprobará que se completen las vueltas solicitadas y que quede tiempo para volver a la Tierra.</small>
+      </label>
     </>}
     <label>Masa de la nave (kg)
       <input type="number" min="0.001" step="any" value={mass} onChange={e => setMass(e.target.value)} disabled={busy} required />
@@ -115,7 +118,7 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
         ? 'Perfil Apolo 8/13: retorno libre alrededor de la Luna, inspirado especialmente en la trayectoria de emergencia del Apolo 13. No es una reconstrucción histórica exacta.'
         : 'El ángulo de llegada se busca automáticamente entre alternativas válidas. La duración es fija.'}</p>
     <details className="technical-details"><summary>Alcance de la búsqueda</summary>
-      <p>{isReturn ? 'Motor de Li con efemérides NASA/JPL, Lambert, corrección de disparo y propagación SciPy solve_ivp (no RK2). Se exige llegada entrante al corredor terrestre a 120 km. Sin modelo atmosférico, sin aterrizaje ni combustible por defecto. El criterio distancia no está implementado por Li para retornos.' : 'Para Δv, Li busca duración y geometrías candidatas hasta el máximo solicitado. Para distancia, se mantiene el optimizador P2 con duración fija. Ninguno garantiza óptimo global.'}</p>
+      <p>{isReturn ? 'El motor utiliza efemérides NASA/JPL, Lambert, corrección de disparo y propagación SciPy solve_ivp (no RK2). Se exige llegada entrante al corredor terrestre a 120 km. Sin modelo atmosférico, sin aterrizaje ni combustible por defecto. La minimización de distancia no está disponible para misiones de retorno.' : 'Para Δv, Se buscan duraciones y geometrías candidatas hasta el máximo solicitado. Para distancia, se utiliza el optimizador con duración fija. Ninguno garantiza óptimo global.'}</p>
     </details>
     {error && <p className="form-error" role="alert">{error}</p>}
     {busy

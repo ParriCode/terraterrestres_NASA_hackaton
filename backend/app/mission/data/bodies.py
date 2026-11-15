@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 
-from app.li_engine.models.domain import CelestialBody
+from app.mission.models.domain import CelestialBody
 
 
 CATALOG_PATH = Path(__file__).with_name("bodies.json")

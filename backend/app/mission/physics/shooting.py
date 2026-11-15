@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import least_squares
 
-from app.li_engine.models.domain import Vec3, validate_positive, validate_vec3
+from app.mission.models.domain import Vec3, validate_positive, validate_vec3
 
 ArrivalResidual = Callable[[Vec3], Vec3]
 

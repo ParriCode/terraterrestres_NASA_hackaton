@@ -390,6 +390,13 @@
     min-height: 39px
 }
 
+.transfer-form .form-help {
+    color: #859db7;
+    font-size: 10px;
+    font-weight: 450;
+    line-height: 1.45;
+}
+
 .transfer-form fieldset {
     border: 0;
     margin: 0;

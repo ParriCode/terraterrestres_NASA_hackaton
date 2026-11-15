@@ -1,5 +1,5 @@
 import type { TransferRequest, TransferResponse, Vec3 } from '../types/transfer'
-import { requestLiOutbound, requestLiRoundTrip } from './liMissions'
+import { requestOptimizedOutbound, requestRoundTripMission } from './missions'
 
 /** Configurable en frontend/.env.local: VITE_API_BASE_URL=http://localhost:8000 */
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
@@ -58,9 +58,9 @@ function isTransferResponse(value: unknown): value is TransferResponse {
 
 export async function requestTransfer(body: TransferRequest, signal?: AbortSignal): Promise<TransferResponse> {
   if (body.mission_mode === 'lunar_orbit_return' || body.mission_mode === 'free_return') {
-    return requestLiRoundTrip(body, signal)
+    return requestRoundTripMission(body, signal)
   }
-  if (body.objective === 'energia') return requestLiOutbound(body, signal)
+  if (body.objective === 'energia') return requestOptimizedOutbound(body, signal)
   const orbitalReturn = false
   const url = `${API_BASE_URL}${orbitalReturn ? '/transfers/lunar-orbit-return' : '/transfers/optimize'}`
   const { mission_mode: _mode, orbit_altitude_km, lunar_revolutions, ...baseBody } = body

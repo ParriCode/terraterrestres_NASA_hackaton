@@ -1,4 +1,4 @@
-"""POST /simulations: validación HTTP y llamada al servicio de Rafa."""
+"""POST /simulations: validación HTTP y coordinación del servicio."""
 
 from __future__ import annotations
 

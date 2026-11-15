@@ -10,12 +10,12 @@ export default function TransferSummary({ transfer, state }: Props) {
   const v0 = transfer.initial_velocity_m_s
   return <aside className="results-panel">
     <h2><Icon name="layers" size={16} />Resultado</h2>
-    <p className="result-caption">{transfer.mission_mode === 'lunar_orbit_return' ? 'Apolo 11 · ' : transfer.mission_mode === 'free_return' ? 'Apolo 8/13 · ' : ''}{transfer.li_mission || transfer.li_one_way_delta_v_m_s != null ? 'Optimización de Li (Δv)' : transfer.objective === 'energia' ? 'Mínima energía' : 'Mínima distancia'} · {transfer.source}</p>
+    <p className="result-caption">{transfer.mission_mode === 'lunar_orbit_return' ? 'Apolo 11 · ' : transfer.mission_mode === 'free_return' ? 'Apolo 8/13 · ' : ''}{transfer.mission_solution || transfer.mission_one_way_delta_v_m_s != null ? 'Optimización orbital (Δv)' : transfer.objective === 'energia' ? 'Mínima energía' : 'Mínima distancia'} · {transfer.source}</p>
     <div className="result-grid">
       <div><span>Velocidad inicial (baricéntrica)</span><strong>{formatKmS(norm(v0))}</strong>
         <small>({kms(v0[0])}, {kms(v0[1])}) km/s</small></div>
       <div><span>Velocidad respecto a la Tierra</span><strong>{formatKmS(transfer.launch_speed_m_s)}</strong></div>
-      <div><span>{transfer.li_mission ? 'Energía cinética inicial (respecto a Tierra)' : 'Energía de lanzamiento'}</span><strong>{formatMJ(transfer.launch_energy_j)}</strong>
+      <div><span>{transfer.mission_solution ? 'Energía cinética inicial (respecto a Tierra)' : 'Energía de lanzamiento'}</span><strong>{formatMJ(transfer.launch_energy_j)}</strong>
         <small>{transfer.mass_kg} kg, respecto a la Tierra</small></div>
       <div><span>Longitud del recorrido{transfer.path_length_approximate ? ' (aprox.)' : ''}</span><strong>{formatKm(transfer.path_length_m)}</strong></div>
       <div><span>{transfer.earth_entry ? 'Desviación del corredor terrestre' : 'Error de llegada'}</span><strong>{formatMeters(transfer.arrival_error_m)}</strong></div>
@@ -26,7 +26,7 @@ export default function TransferSummary({ transfer, state }: Props) {
           {transfer.optimization.search_complete ? ' · Búsqueda acotada finalizada' : ' · Búsqueda limitada por tiempo'}
         </small>}</div>}
     </div>
-    {transfer.lunar_orbit && !transfer.li_mission && <>
+    {transfer.lunar_orbit && !transfer.mission_solution && <>
       <h3><Icon name="orbit" size={14} />Órbita lunar y retorno</h3>
       <div className="result-grid">
         <div><span>Tiempo de regreso</span><strong>{(transfer.duration_s / 86400).toLocaleString('es-ES', { maximumFractionDigits: 2 })} días</strong>
@@ -45,22 +45,22 @@ export default function TransferSummary({ transfer, state }: Props) {
       </div>
       <p className="results-disclaimer">Se han propagado tres arcos y dos impulsos ideales. La búsqueda es acotada. No se simula reentrada ni aterrizaje.</p>
     </>}
-    {transfer.lunar_orbit && !transfer.li_mission && <p className="form-note">Fase: <strong>{state.t_s < transfer.lunar_orbit.orbit_insertion_t_s ? 'Viaje hacia la Luna'
+    {transfer.lunar_orbit && !transfer.mission_solution && <p className="form-note">Fase: <strong>{state.t_s < transfer.lunar_orbit.orbit_insertion_t_s ? 'Viaje hacia la Luna'
       : state.t_s < transfer.lunar_orbit.orbit_departure_t_s ? 'En órbita lunar'
         : state.t_s >= transfer.duration_s - 1e-6 ? 'Llegada a la Tierra (120 km)' : 'Regreso hacia la Tierra'}</strong></p>}
-    {transfer.li_one_way_delta_v_m_s != null && <div className="result-grid"><div><span>Δv total de transferencia</span><strong>{formatKmS(transfer.li_one_way_delta_v_m_s)}</strong><small>Duración elegida por el optimizador, no necesariamente la máxima.</small></div></div>}
-    {transfer.li_mission && <>
-      <h3><Icon name="orbit" size={14} />Misión 3D calculada por Li</h3>
+    {transfer.mission_one_way_delta_v_m_s != null && <div className="result-grid"><div><span>Δv total de transferencia (ORBITAL4B)</span><strong>{formatKmS(transfer.mission_one_way_delta_v_m_s)}</strong><small>Duración elegida por el optimizador, no necesariamente la máxima.</small></div></div>}
+    {transfer.mission_solution && <>
+      <h3><Icon name="orbit" size={14} />Misión 3D calculada</h3>
       <div className="result-grid">
         <div><span>Duración real / máxima</span><strong>{(transfer.duration_s / 86400).toFixed(2)} / {((transfer.requested_duration_s ?? transfer.duration_s) / 86400).toFixed(2)} días</strong></div>
-        <div><span>Δv total de maniobras</span><strong>{formatKmS(transfer.li_mission.total_delta_v_m_s)}</strong>
-          <small>TLI {formatKmS(transfer.li_mission.tli_delta_v_m_s)} · LOI {formatKmS(transfer.li_mission.loi_delta_v_m_s)} · TEI {formatKmS(transfer.li_mission.tei_delta_v_m_s)}</small></div>
-        <div><span>Altitud mínima lunar</span><strong>{transfer.li_mission.min_lunar_altitude_km.toFixed(1)} km</strong></div>
-        {transfer.li_mission.mode === 'lunar_orbit' && <div><span>Vueltas lunares verificadas</span><strong>{transfer.li_mission.actual_lunar_revolutions.toFixed(2)}</strong></div>}
+        <div><span>Δv total de maniobras</span><strong>{formatKmS(transfer.mission_solution.total_delta_v_m_s)}</strong>
+          <small>TLI {formatKmS(transfer.mission_solution.tli_delta_v_m_s)} · LOI {formatKmS(transfer.mission_solution.loi_delta_v_m_s)} · TEI {formatKmS(transfer.mission_solution.tei_delta_v_m_s)}</small></div>
+        <div><span>Altitud mínima lunar</span><strong>{transfer.mission_solution.min_lunar_altitude_km.toFixed(1)} km</strong></div>
+        {transfer.mission_solution.mode === 'lunar_orbit' && <div><span>Vueltas lunares verificadas</span><strong>{transfer.mission_solution.actual_lunar_revolutions.toFixed(2)}</strong></div>}
         <div><span>Llegada a la Tierra</span><strong>{transfer.earth_entry?.altitude_km.toFixed(2)} km de altitud</strong><small>Movimiento entrante: {transfer.earth_entry?.inbound ? 'sí' : 'no'}</small></div>
         <div><span>Velocidad relativa de llegada</span><strong>{formatKmS(transfer.earth_entry?.relative_speed_m_s ?? 0)}</strong></div>
       </div>
-      <p className="results-disclaimer">Propagación de misión Li: SciPy solve_ivp. Llegada validada al corredor terrestre, no reentrada aerodinámica ni aterrizaje. Δv de maniobras, no combustible consumido; búsqueda acotada.</p>
+      <p className="results-disclaimer">Propagación de misión ORBITAL4B: SciPy solve_ivp. Llegada validada al corredor terrestre, no reentrada aerodinámica ni aterrizaje. Δv de maniobras, no combustible consumido; búsqueda acotada.</p>
     </>}
     <h3><Icon name="clock" size={14} />Instante seleccionado</h3>
     <div className="result-grid">
@@ -68,6 +68,6 @@ export default function TransferSummary({ transfer, state }: Props) {
       <div><span>Velocidad (vx, vy)</span><strong>({kms(state.velocity_m_s[0])}, {kms(state.velocity_m_s[1])}) km/s</strong>
         <small>|v| = {formatKmS(norm(state.velocity_m_s))}</small></div>
     </div>
-    <p className="results-disclaimer">{transfer.li_mission ? 'Motor 3D de Li, proyectado al plano ICRF XY.' : 'Modelo planar baricéntrico Tierra–Luna.'} Valores intermedios interpolados localmente entre {transfer.samples.length} muestras del backend.</p>
+    <p className="results-disclaimer">{transfer.mission_solution ? 'Motor orbital 3D, proyectado al plano ICRF XY.' : 'Modelo planar baricéntrico Tierra–Luna.'} Valores intermedios interpolados localmente entre {transfer.samples.length} muestras del backend.</p>
   </aside>
 }

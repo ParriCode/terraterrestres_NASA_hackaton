@@ -7,8 +7,8 @@ Devuelve (samples, events, SimulationStatus) sin modificar el dominio comun.
 import math
 from collections.abc import Sequence
 
-from app.li_engine.data.scenarios import Scenario
-from app.li_engine.models.domain import (
+from app.mission.data.scenarios import Scenario
+from app.mission.models.domain import (
     CelestialBody,
     Event,
     EventType,
@@ -18,9 +18,9 @@ from app.li_engine.models.domain import (
     TrajectorySample,
     Vec3,
 )
-from app.li_engine.physics.dynamics import get_body_position_m, state_derivative
-from app.li_engine.physics.events import find_colliding_body, segment_min_distance_sq
-from app.li_engine.physics.gravity import GravityError
+from app.mission.physics.dynamics import get_body_position_m, state_derivative
+from app.mission.physics.events import find_colliding_body, segment_min_distance_sq
+from app.mission.physics.gravity import GravityError
 
 # Limites internos de seguridad (no son campos nuevos de SimulationConfig).
 _MAX_STEP_RETRIES = 48

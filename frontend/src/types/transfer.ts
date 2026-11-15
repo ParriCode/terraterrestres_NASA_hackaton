@@ -7,7 +7,7 @@ export type TransferRequest = {
   date: string // ISO 8601 con zona horaria
   mission_mode?: MissionMode
   orbit_altitude_km?: number
-  lunar_revolutions?: 1 | 2
+  lunar_revolutions?: number
   duration_s: number
   launch_angle_deg: number
   objective: TransferObjective
@@ -69,8 +69,8 @@ export type TransferResponse = {
   total_maneuver_delta_v_m_s?: number
   model_limitations?: string[]
   path_length_approximate?: boolean
-  li_one_way_delta_v_m_s?: number
-  li_mission?: {
+  mission_one_way_delta_v_m_s?: number
+  mission_solution?: {
     mode: 'free_return' | 'lunar_orbit'
     total_delta_v_m_s: number
     tli_delta_v_m_s: number

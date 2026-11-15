@@ -4,11 +4,11 @@ from datetime import datetime
 
 import numpy as np
 
-from app.li_engine.data.scenarios import PlanarScenario
-from app.li_engine.models.domain import SpacecraftState, Vec3, validate_positive, validate_vec3
-from app.li_engine.physics.lambert import LambertError, solve_lambert
-from app.li_engine.physics.propagation import propagate_planar
-from app.li_engine.physics.shooting import solve_shooting
+from app.mission.data.scenarios import PlanarScenario
+from app.mission.models.domain import SpacecraftState, Vec3, validate_positive, validate_vec3
+from app.mission.physics.lambert import LambertError, solve_lambert
+from app.mission.physics.propagation import propagate_planar
+from app.mission.physics.shooting import solve_shooting
 
 
 class TransferNotFoundError(RuntimeError):

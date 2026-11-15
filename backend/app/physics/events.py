@@ -115,7 +115,7 @@ def swept_collision_closest_fraction(
 ) -> float | None:
     """Fracción de máxima aproximación de la cuerda, si cruza la esfera.
 
-    Compatibilidad con la implementación original de Li. NO equivale a
+    Compatibilidad con la implementación original de ORBITAL4B. NO equivale a
     la fracción de primer impacto ni certifica el evento orbital real.
     """
     if not math.isfinite(body_radius_m) or body_radius_m <= 0:

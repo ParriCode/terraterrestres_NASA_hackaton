@@ -10,20 +10,20 @@ import numpy as np
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import AwareDatetime, BaseModel, Field, model_validator
 
-from app.li_engine.data.ephemeris import EphemerisError
-from app.li_engine.models.domain import REFERENCE_FRAME
-from app.li_engine.data.bodies import load_bodies
-from app.li_engine.services.mission_optimizer import (
+from app.mission.data.ephemeris import EphemerisError
+from app.mission.models.domain import REFERENCE_FRAME
+from app.mission.data.bodies import load_bodies
+from app.services.mission_optimizer import (
     DEFAULT_PARKING_ALT_M,
     NoFeasibleTransfer,
     optimize_transfer,
     optimize_round_trip_transfer,
 )
-from app.li_engine.services.propulsion import estimate_propellant
-from app.li_engine.services.transfer_service import TransferNotFoundError, design_transfer
-from app.li_engine.transfer_schemas import OptimizedResponse, RoundTripResponse, TransferResponse
+from app.mission.services.propulsion import estimate_propellant
+from app.mission.services.transfer_service import TransferNotFoundError, design_transfer
+from app.mission.transfer_schemas import OptimizedResponse, RoundTripResponse, TransferResponse
 
-router = APIRouter(prefix="/li-transfers", tags=["Transferencias"])
+router = APIRouter(prefix="/missions", tags=["Transferencias"])
 
 # Un request CPU-intensivo ya se ejecuta en un worker por ser endpoint `def`.
 # Este semáforo evita lanzar demasiados solvers simultáneos en un proceso.
@@ -94,7 +94,7 @@ class RoundTripTransferRequest(BaseModel):
     initial_mass_kg: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     isp_s: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     mass_kg: float = Field(default=1000, gt=0, allow_inf_nan=False)
-    lunar_revolutions: Literal[1, 2] | None = None
+    lunar_revolutions: int | None = Field(default=None, ge=1, le=100, strict=True)
 
     @model_validator(mode="after")
     def _validate_round_trip(self):
@@ -120,14 +120,12 @@ def _time_grid(trajectory, duration_s: float, count: int) -> np.ndarray:
     for t in boundaries:
         marks.extend((max(0.0, t - 0.05), t))
     mandatory = np.unique(np.asarray(marks, dtype=np.float64))
-    # Mostrar órbitas lunares requiere una malla visual mucho más fina que
-    # la transferencia de 10 días: reservar hasta un tercio de las muestras
-    # dentro del tramo LOI -> TEI, manteniendo el mismo N contractual.
+    # Concentrar muestras en la estancia lunar evita perder vueltas al dibujarla.
     focus_count = 0
     stay_start = float(getattr(trajectory, 'outbound_duration_s', 0.0))
     stay_length = float(getattr(trajectory, 'lunar_stay_s', 0.0))
     if getattr(trajectory, 'mode', '') == 'lunar_orbit' and stay_length > 0 and count >= 100:
-        focus_count = min(count // 3, 160)
+        focus_count = min(int(count * 0.75), max(160, int(stay_length / 450)))
     inner_global = np.linspace(0.0, duration_s, count - len(mandatory) - focus_count + 2)[1:-1]
     if focus_count:
         inner_focus = np.linspace(stay_start, stay_start + stay_length, focus_count + 2)[1:-1]
@@ -321,14 +319,14 @@ def optimize(request: OptimizeTransferRequest):
 def _lunar_orbits_completed(rt) -> float:
     """Cuenta revoluciones geométricas reales respecto a la Luna durante la estancia.
 
-    La posición se mide en el marco 3D de Li. No se usa el SVG ni una órbita
+    La posición se mide en el marco 3D de ORBITAL4B. No se usa el SVG ni una órbita
     circular dibujada para certificar que se completó la estancia.
     """
     if rt.mode != "lunar_orbit" or rt.lunar_stay_s < 1.0:
         return 0.0
     start = rt.outbound_duration_s
     stop = start + rt.lunar_stay_s
-    ts = np.linspace(start, stop, max(64, int(rt.lunar_stay_s / 900)))
+    ts = np.linspace(start, stop, max(128, int(rt.lunar_stay_s / 300)))
     moon = rt.scenario.bodies["moon"]
     rel = np.asarray([
         np.asarray(rt.pos(float(t))) - np.asarray(moon.pos(float(t)))
@@ -357,6 +355,19 @@ def round_trip(request: RoundTripTransferRequest):
         radius = moon.radius_m + request.lunar_periapsis_alt_m
         period_s = 2.0 * math.pi * math.sqrt(radius ** 3 / moon.mu_m3_s2)
         stay_s = period_s * request.lunar_revolutions
+        if stay_s > 14 * 86400 or stay_s + 5.5 * 86400 > request.max_total_duration_s:
+            return {
+                "status": "no_feasible_solution",
+                "source": "NASA/JPL Horizons",
+                "mode": request.mode,
+                "date": request.date,
+                "max_total_duration_s": request.max_total_duration_s,
+                "reasons": [
+                    f"La ventana de {request.max_total_duration_s / 86400:.1f} días no permite "
+                    f"{request.lunar_revolutions} vueltas lunares "
+                    f"({stay_s / 86400:.2f} días de estancia), más la ida y el retorno."
+                ],
+            }
     try:
         rt = optimize_round_trip_transfer(
             request.date,
@@ -393,11 +404,11 @@ def round_trip(request: RoundTripTransferRequest):
     v_rel = np.asarray(ship_final.velocity_m_s) - np.asarray(earth.speed(t_end))
     incoming = float(np.dot(r_rel, v_rel)) < 0.0
     error_m = abs(rt.earth_reentry_altitude_m - request.reentry_alt_m)
-    # Li valida el corredor con tolerancia de 40 km en modo orbital.
+    # ORBITAL4B valida el corredor con tolerancia de 40 km en modo orbital.
     # El retorno no debe aparecer como éxito si la geometría es incorrecta.
     validated = incoming and error_m <= 40_000.0
     revolutions_completed = _lunar_orbits_completed(rt)
-    if request.lunar_revolutions is not None and revolutions_completed + 0.10 < request.lunar_revolutions:
+    if request.lunar_revolutions is not None and abs(revolutions_completed - request.lunar_revolutions) > 0.20:
         return {"status": "no_feasible_solution", "source": "NASA/JPL Horizons", "mode": request.mode,
                 "date": request.date, "max_total_duration_s": request.max_total_duration_s,
                 "reasons": [f"Se propagaron {revolutions_completed:.2f} vueltas; se solicitaron {request.lunar_revolutions}."]}

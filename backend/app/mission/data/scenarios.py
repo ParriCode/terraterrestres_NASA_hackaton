@@ -6,9 +6,9 @@ import math
 import numpy as np
 from scipy.interpolate import CubicHermiteSpline
 
-from app.li_engine.data.bodies import load_bodies
-from app.li_engine.data import ephemeris
-from app.li_engine.models.domain import (
+from app.mission.data.bodies import load_bodies
+from app.mission.data import ephemeris
+from app.mission.models.domain import (
     CelestialBody,
     SimulationConfig,
     Vec3,

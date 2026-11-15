@@ -148,14 +148,14 @@ def optimize(request: OptimizeTransferRequest):
     return payload
 
 class LunarOrbitReturnRequest(BaseModel):
-    """Una órbita lunar propulsada y regreso a esfera de 100.000 km de Tierra."""
+    """Inserción en órbita lunar, revoluciones configurables y regreso terrestre."""
     date: AwareDatetime
     duration_s: float = Field(default=10 * 86400, ge=4 * 86400, le=30 * 86400, allow_inf_nan=False)
     objective: Literal["energia", "distancia"] = "energia"
     mass_kg: float = Field(default=1000, gt=0, allow_inf_nan=False)
     launch_angle_deg: float = Field(default=90, allow_inf_nan=False)
     orbit_altitude_km: float = Field(default=100, ge=50, le=500, allow_inf_nan=False)
-    lunar_revolutions: Literal[1, 2] = 1
+    lunar_revolutions: int = Field(default=1, ge=1, le=100, strict=True)
     samples: int = Field(default=450, ge=100, le=4000)
 
 

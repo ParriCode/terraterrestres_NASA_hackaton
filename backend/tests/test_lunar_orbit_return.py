@@ -100,7 +100,20 @@ def test_complete_lunar_orbit_return_with_synthetic_fixed_bodies(monkeypatch):
     assert result['lunar_orbit']['return_arrival_t_s'] == pytest.approx(ts[-1])
     assert all(a < b for a, b in zip(ts, ts[1:]))
     last = result['samples'][-1]
-    assert math.isclose(np.linalg.norm(np.array(last['position_m'][:2])), 100_000_000, abs_tol=50_000)
+    earth_position = np.array(last['body_positions_m']['earth'][:2])
+    entry_radius = lunar._entry_radius_m(FixedScenario(datetime(2026, 11, 15, tzinfo=timezone.utc), 10 * 86400))
+    assert np.linalg.norm(np.array(last['position_m'][:2]) - earth_position) == pytest.approx(entry_radius, abs=500)
+    assert result['earth_entry']['altitude_km'] == 120
+    assert result['earth_entry']['inbound'] is True
+    assert result['earth_entry']['validated'] is True
+    assert result['earth_entry']['landing_simulated'] is False
+    assert result['return_interface_radius_m'] == pytest.approx(entry_radius)
+
+
+def test_earth_entry_uses_actual_body_radius():
+    scenario = FixedScenario(datetime(2026, 11, 15, tzinfo=timezone.utc), 86400)
+    scenario.bodies['earth'].radius_m = 6_380_000.0
+    assert lunar._entry_radius_m(scenario) == pytest.approx(6_500_000.0)
 
 
 def test_api_rejects_invalid_or_no_solution(monkeypatch):

@@ -19,8 +19,8 @@ from urllib.request import Request, urlopen
 import numpy as np
 from scipy.interpolate import CubicHermiteSpline
 
-from app.li_engine.config.bodies import CELESTIAL_BODIES, HORIZONS_API_URL, HORIZONS_TIMEOUT_S
-from app.li_engine.models.domain import CelestialBody, Vec3
+from app.mission.config.bodies import CELESTIAL_BODIES, HORIZONS_API_URL, HORIZONS_TIMEOUT_S
+from app.mission.models.domain import CelestialBody, Vec3
 
 _MASTER_STEP_S = 600.0
 _MIN_MASTER_DAYS = 35

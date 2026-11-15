@@ -4,7 +4,7 @@ import math
 from collections.abc import Sequence
 from typing import Protocol
 
-from app.li_engine.models.domain import SpacecraftState, Vec3
+from app.mission.models.domain import SpacecraftState, Vec3
 
 
 class CollidableBody(Protocol):

@@ -35,7 +35,7 @@ def body(body_id="earth", mu=1e-9, radius=1.0):
 
 def config(position, velocity, duration=1.0, step=1.0):
     # integrate solo lee estos 3 campos de SimulationConfig; evita
-    # depender del constructor del modelo, que mantiene Angel.
+    # depender del constructor de dominio compartido.
     return SimpleNamespace(
         initial_state=SpacecraftState(position_m=position, velocity_m_s=velocity),
         duration_s=duration,
@@ -43,7 +43,7 @@ def config(position, velocity, duration=1.0, step=1.0):
     )
 
 
-class LiPhysicsTests(unittest.TestCase):
+class MissionPhysicsTests(unittest.TestCase):
     def test_gravity_attracts_toward_body(self):
         acceleration = gravitational_acceleration(
             (10.0, 0.0, 0.0), {"earth": (0.0, 0.0, 0.0)},
@@ -200,7 +200,7 @@ class LiPhysicsTests(unittest.TestCase):
 
 
 
-class LiRegressionTests(unittest.TestCase):
+class MissionRegressionTests(unittest.TestCase):
     """Regression cases for failures in the supplied physics.zip."""
 
     def test_midpoint_inside_body_is_collision_not_numerical_error(self):
@@ -268,8 +268,8 @@ class LiRegressionTests(unittest.TestCase):
             (-2., 2., 0.), (2., 2., 0.), (0., 0., 0.), (0., 0., 0.), 1.0))
 
     def test_legacy_body_pos_variant_still_supported(self):
-        # The user ZIP directly calls body.pos(t). Both variants use exactly
-        # the same provider for derivatives and stored samples.
+        # La evaluación de posiciones y la generación de muestras utilizan
+        # el mismo proveedor para evitar inconsistencias temporales.
         moving = SimpleNamespace(id="earth", mu_m3_s2=1e-12,
                                  radius_m=1., pos=lambda t: (100. + t, 0., 0.))
         class LegacyScenario:

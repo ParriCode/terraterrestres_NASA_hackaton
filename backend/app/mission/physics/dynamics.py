@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.li_engine.data.scenarios import Scenario
-from app.li_engine.models.domain import SpacecraftState, Vec3
-from app.li_engine.physics.gravity import gravitational_acceleration
+from app.mission.data.scenarios import Scenario
+from app.mission.models.domain import SpacecraftState, Vec3
+from app.mission.physics.gravity import gravitational_acceleration
 
 
 def get_body_position_m(scenario: Scenario, body, t_s: float) -> Vec3:

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import math
 
-from app.li_engine.models.domain import Vec3, validate_positive, validate_vec3
+from app.mission.models.domain import Vec3, validate_positive, validate_vec3
 
 
 class LambertError(ValueError):
