@@ -57,7 +57,7 @@ export default function App() {
       const result = await requestTransfer(request, signal.signal)
       if (signal.signal.aborted) return
       const id = crypto.randomUUID()
-      const title = `${result.mission_mode === 'lunar_orbit_return' ? 'Apolo 11' : result.mission_mode === 'free_return' ? 'Apolo 8/13' : result.mission_one_way_delta_v_m_s != null ? 'Transferencia directa · ORBITAL4B' : (result.objective === 'energia' ? 'Energía mínima' : 'Distancia mínima')} · ${new Date(result.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`
+      const title = `${result.mission_mode === 'lunar_orbit_return' ? 'Apolo 11' : result.mission_mode === 'free_return' ? 'Apolo 8/13' : result.mission_one_way_delta_v_m_s != null ? 'Transferencia directa · ORBITAL4B' : 'Energía mínima'} · ${new Date(result.date).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}`
       setJourneys(prev => [...prev, { id, title, response: result, color: COLORS[prev.length % COLORS.length], visible: true }])
       setSelectedId(id); setTime(0); setShowForm(false); setShowDrawer(false); setShowResults(true)
     } catch (e) {
