@@ -689,6 +689,94 @@ def _propagate_fixed_lunar_stay(
     return solution, np.asarray(solution.sol(departure_time_s), dtype=np.float64)
 
 
+
+def _search_earth_return_from_lunar_orbit(
+    bodies: tuple,
+    departure_state: np.ndarray,
+    departure_time_s: float,
+    max_total_duration_s: float,
+    reentry_radius_m: float,
+    *,
+    min_inbound_s: float = 2.2 * 86400.0,
+):
+    """Busca una salida impulsiva con entrada terrestre verificada por evento.
+
+    La fecha de la maniobra lunar permanece fija. Se exploran ambas
+    orientaciones tangenciales y pequeñas componentes radiales, sin imponer
+    ni un punto de entrada ni un instante final arbitrarios. El barrido es
+    limitado y no constituye una optimización global del delta-v.
+    """
+    if max_total_duration_s - departure_time_s < min_inbound_s:
+        return None
+
+    earth = next(body for body in bodies if body.id == "earth")
+    moon = next(body for body in bodies if body.id == "moon")
+    r0 = np.asarray(departure_state[:3], dtype=np.float64)
+    moon_position = np.asarray(moon.pos(departure_time_s), dtype=np.float64)
+    moon_velocity = np.asarray(moon.speed(departure_time_s), dtype=np.float64)
+    earth_position = np.asarray(earth.pos(departure_time_s), dtype=np.float64)
+    relative_position = r0 - moon_position
+    radius_m = float(np.linalg.norm(relative_position))
+    if radius_m <= float(moon.radius_m):
+        return None
+    radial = relative_position / radius_m
+    relative_velocity = np.asarray(departure_state[3:], dtype=np.float64) - moon_velocity
+    tangent = relative_velocity - float(np.dot(relative_velocity, radial)) * radial
+    tangent_norm = float(np.linalg.norm(tangent))
+    if tangent_norm < 1e-9:
+        return None
+    tangent /= tangent_norm
+    earth_direction = earth_position - moon_position
+    # La primera familia de semillas apunta hacia el hemisferio terrestre.
+    if float(np.dot(tangent, earth_direction)) < 0.0:
+        tangent = -tangent
+
+    escape_speed = math.sqrt(2.0 * moon.mu_m3_s2 / radius_m)
+    # Se prueban primero condiciones ligeramente hiperbólicas, como semillas
+    # de salida, sin alterar el estado orbital previo a la maniobra.
+    speed_factors = (1.12, 1.08, 1.15, 1.20, 1.25)
+    angles_deg = (-18.0, -15.0, -12.0, -8.0, 0.0, 8.0, 15.0, 30.0, 60.0, 90.0, 120.0, 150.0)
+    for direction in (1.0, -1.0):
+        for factor in speed_factors:
+            for angle_deg in angles_deg:
+                angle = math.radians(angle_deg)
+                escape_direction = (
+                    direction * math.cos(angle) * tangent
+                    + math.sin(angle) * radial
+                )
+                velocity = moon_velocity + factor * escape_speed * escape_direction
+                solution = _propagate_3d(
+                    bodies,
+                    np.concatenate((r0, velocity)),
+                    departure_time_s,
+                    max_total_duration_s,
+                    rtol=1e-9,
+                    atol=1e-9,
+                    dense_output=True,
+                    strict_impact=True,
+                    reentry_radius_m=reentry_radius_m,
+                    reentry_after_s=departure_time_s + min_inbound_s,
+                    max_step=3600.0,
+                )
+                if not solution.success or solution.sol is None or solution.t_events is None:
+                    continue
+                if len(solution.t_events) < 3 or len(solution.t_events[2]) != 1:
+                    continue
+                arrival_time_s = float(solution.t_events[2][0])
+                if not departure_time_s + min_inbound_s <= arrival_time_s <= max_total_duration_s:
+                    continue
+                state_end = np.asarray(solution.sol(arrival_time_s), dtype=np.float64)
+                rel_r = state_end[:3] - np.asarray(earth.pos(arrival_time_s))
+                rel_v = state_end[3:] - np.asarray(earth.speed(arrival_time_s))
+                altitude_error = abs(float(np.linalg.norm(rel_r)) - reentry_radius_m)
+                if altitude_error > 500.0 or float(np.dot(rel_r, rel_v)) >= 0.0:
+                    continue
+                # Una llegada física válida basta para salir del barrido.
+                # Este respaldo no certifica el mínimo global de delta-v.
+                return velocity, solution, arrival_time_s
+    return None
+
+
 def _orbital_basis(earth, moon, t_s: float = 0.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Base ortonormal (u_em, u_perp, u_h) del plano instantáneo Tierra-Luna."""
     rel_m = np.asarray(moon.pos(t_s), dtype=np.float64) - np.asarray(earth.pos(t_s), dtype=np.float64)
@@ -1283,8 +1371,20 @@ def optimize_round_trip_transfer(
                     tol_m=30_000.0,
                 )
                 if not ok_in:
-                    reasons.append("Tramo de retorno no convergió a la reentrada terrestre")
-                    continue
+                    # No es necesario acertar un punto fijo en un día concreto:
+                    # basta una primera entrada terrestre entrante dentro de la ventana.
+                    alternative = _search_earth_return_from_lunar_orbit(
+                        bodies,
+                        y_tei,
+                        t_depart_moon,
+                        max_total_duration_s,
+                        r_reentry,
+                    )
+                    if alternative is None:
+                        reasons.append("Tramo de retorno no alcanzó el corredor terrestre dentro de la ventana")
+                        continue
+                    v_tei_opt, sol_in, t_end = alternative
+                    t_in = t_end - t_depart_moon
 
                 tei_dv = float(np.linalg.norm(v_tei_opt - v_pre_tei))
                 total_dv = float(tli_dv + loi_dv + tei_dv)
