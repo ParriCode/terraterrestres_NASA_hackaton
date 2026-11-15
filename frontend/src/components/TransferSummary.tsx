@@ -48,7 +48,7 @@ export default function TransferSummary({ transfer, state }: Props) {
     {transfer.lunar_orbit && !transfer.li_mission && <p className="form-note">Fase: <strong>{state.t_s < transfer.lunar_orbit.orbit_insertion_t_s ? 'Viaje hacia la Luna'
       : state.t_s < transfer.lunar_orbit.orbit_departure_t_s ? 'En órbita lunar'
         : state.t_s >= transfer.duration_s - 1e-6 ? 'Llegada a la Tierra (120 km)' : 'Regreso hacia la Tierra'}</strong></p>}
-    {transfer.li_one_way_delta_v_m_s != null && <div className="result-grid"><div><span>Δv total de transferencia (Li)</span><strong>{formatKmS(transfer.li_one_way_delta_v_m_s)}</strong><small>Duración elegida por el optimizador, no necesariamente la máxima.</small></div></div>}
+    {transfer.li_one_way_delta_v_m_s != null && <div className="result-grid"><div><span>Δv total de transferencia</span><strong>{formatKmS(transfer.li_one_way_delta_v_m_s)}</strong><small>Duración elegida por el optimizador, no necesariamente la máxima.</small></div></div>}
     {transfer.li_mission && <>
       <h3><Icon name="orbit" size={14} />Misión 3D calculada por Li</h3>
       <div className="result-grid">

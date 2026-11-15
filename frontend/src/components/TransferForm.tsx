@@ -104,7 +104,7 @@ export default function TransferForm({ busy, onSubmit, onCancel, onDateChange }:
       <legend>Objetivo</legend>
       <div className="segmented">
         <button type="button" aria-pressed={objective === 'energia'} className={objective === 'energia' ? 'active' : ''}
-          onClick={() => setObjective('energia')}>{isReturn ? 'Menor Δv encontrado' : 'Menor Δv (Li)'}</button>
+          onClick={() => setObjective('energia')}>{isReturn ? 'Menor Δv encontrado' : 'Menor Δv'}</button>
         <button type="button" aria-pressed={objective === 'distancia'} className={objective === 'distancia' ? 'active' : ''}
           disabled={isReturn} onClick={() => setObjective('distancia')}>Mínima distancia</button>
       </div>
