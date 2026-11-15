@@ -71,6 +71,7 @@ class CelestialBody:
     mu_m3_s2: float
     radius_m: float
 
+    # Variable validations
     def __post_init__(self) -> None:
         validate_non_empty_str(self.id, "id")
         validate_non_empty_str(self.name, "name")
@@ -84,6 +85,7 @@ class SpacecraftState:
     position_m: Vec3
     velocity_m_s: Vec3
 
+    # Variable validations
     def __post_init__(self) -> None:
         validate_vec3(self.position_m, "position_m")
         validate_vec3(self.velocity_m_s, "velocity_m_s")
@@ -99,6 +101,7 @@ class SimulationConfig:
     step_s: float
     date: datetime
 
+    # Variable validations
     def __post_init__(self) -> None:
         validate_non_empty_str(self.scenario_id, "scenario_id")
         if not isinstance(self.initial_state, SpacecraftState):
@@ -118,6 +121,7 @@ class TrajectorySample:
     spacecraft: SpacecraftState
     body_positions_m: dict[str, Vec3]
 
+    # Variable validations
     def __post_init__(self) -> None:
         validate_non_negative(self.t_s, "t_s")
         if not isinstance(self.spacecraft, SpacecraftState):
@@ -137,6 +141,7 @@ class Event:
     body_id: str
     position_m: Vec3
 
+    # Variable validations
     def __post_init__(self) -> None:
         if not isinstance(self.type, EventType):
             raise TypeError("'type' must be a valid EventType.")
@@ -153,6 +158,7 @@ class Diagnostics:
     min_distance_m: dict[str, float]
     min_altitude_m: dict[str, float]
 
+    # Variable validations
     def __post_init__(self) -> None:
         validate_non_negative(self.final_time_s, "final_time_s")
         if isinstance(self.steps_completed, bool) or not isinstance(self.steps_completed, int) or self.steps_completed < 0:
@@ -176,6 +182,7 @@ class SimulationResult:
     frame: str = REFERENCE_FRAME
     units: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_UNITS))
 
+    # Variable validations
     def __post_init__(self) -> None:
         if not isinstance(self.status, SimulationStatus):
             raise TypeError("'status' must be a valid SimulationStatus.")

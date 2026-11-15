@@ -3,6 +3,7 @@ import type { TransferResponse, TransferState } from '../types/transfer'
 import type { EarthMoonEphemeris, SunDirectionEphemeris } from '../api/ephemerides'
 import { SpaceRenderer } from '../renderer/SpaceRenderer'
 import Icon from './Icon'
+import { bodyName } from '../data/solarSystem'
 
 type Props = {
   preview: EarthMoonEphemeris | null
@@ -13,6 +14,7 @@ type Props = {
   transfer: TransferResponse | null
   state: TransferState | null
   time: number
+  onSolar: () => void
   visible?: boolean
   color?: string
 }
@@ -21,7 +23,7 @@ type Props = {
  * Reemplazo 3D del SVG. Los cuerpos y el cohete se sitúan con las coordenadas
  * NASA/JPL o con las muestras de la misión recibidas, nunca con órbitas inventadas.
  */
-export default function TransferView3D({ date, transfer, state, preview, previewError, sun, sunError, visible = true, color = '#64ead5' }: Props) {
+export default function TransferView3D({ date, transfer, state, preview, previewError, sun, sunError, onSolar, visible = true, color = '#64ead5' }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const earthLabel = useRef<HTMLDivElement>(null)
   const moonLabel = useRef<HTMLDivElement>(null)
@@ -59,25 +61,26 @@ export default function TransferView3D({ date, transfer, state, preview, preview
   useEffect(() => { renderer.current?.setEnhanced(enhanced) }, [enhanced])
   useEffect(() => { renderer.current?.setTracks(showTracks) }, [showTracks])
 
+  const originId=transfer?.origin_id??'earth',destinationId=transfer?.destination_id??'moon'
   const heading = transfer?.mission_mode === 'lunar_orbit_return'
     ? 'Órbita lunar y regreso'
     : transfer?.mission_mode === 'free_return'
       ? 'Retorno libre Tierra–Luna–Tierra'
-      : transfer ? 'Transferencia lunar calculada'
+      : transfer ? `Trayectoria ${bodyName(originId)} → ${bodyName(destinationId)}`
         : preview ? 'Tierra y Luna en la fecha seleccionada'
           : previewError ? 'Efemérides no disponibles' : 'Consultando NASA/JPL Horizons…'
 
   return <div className="transfer-view transfer-view-3d">
-    <canvas className="space-canvas" ref={canvas} aria-label="Visor tridimensional interactivo del sistema Tierra–Luna. Arrastra para orbitar, rueda para zoom y botón derecho para desplazar." />
-    <div ref={earthLabel} className="space-label space-label-earth" style={{ display: 'none' }}>TIERRA</div>
-    <div ref={moonLabel} className="space-label space-label-moon" style={{ display: 'none' }}>LUNA</div>
+    <canvas className="space-canvas" ref={canvas} aria-label="Visor tridimensional interactivo de transferencias entre cuerpos del sistema solar. Arrastra para orbitar, rueda para zoom y botón derecho para desplazar." />
+    <div ref={earthLabel} className="space-label space-label-earth" style={{ display: 'none' }}>{bodyName(originId).toUpperCase()}</div>
+    <div ref={moonLabel} className="space-label space-label-moon" style={{ display: 'none' }}>{bodyName(destinationId).toUpperCase()}</div>
     <div ref={shipLabel} className="space-label space-label-ship" style={{ display: 'none' }}>NAVE · ORBITAL4B</div>
 
     <div className="scene-heading scene-heading-local space-heading">
-      <span className="eyebrow">SISTEMA TIERRA–LUNA <span className="space-dimension">VISOR 3D</span></span>
+      <span className="eyebrow">{bodyName(originId)} → {bodyName(destinationId)} <span className="space-dimension">VISOR 3D</span></span>
       <h1>{heading}</h1>
       <p>{transfer
-        ? `${transfer.source}: trayectoria y posiciones del motor orbital, reconstruidas en 3D.`
+        ? `${transfer.source}: trayectoria y posiciones del motor orbital, proyectadas en una escena 3D (el modelo interplanetario de origen es planar).`
         : previewError || (preview
           ? `Coordenadas ICRF de NASA/JPL · ${new Date(preview.date).toLocaleString('es-ES', { timeZone: 'UTC' })} UTC`
           : 'Cargando posiciones reales para la fecha UTC elegida; no se utilizan efemérides ficticias.')}</p>
@@ -94,12 +97,13 @@ export default function TransferView3D({ date, transfer, state, preview, preview
     </div>
 
     <div className="map-tools space-controls" aria-label="Controles de la cámara 3D">
+      <button type="button" className="icon-button" onClick={onSolar} aria-label="Volver al sistema solar" title="Volver al sistema solar"><Icon name="back" /></button>
       <button type="button" className="icon-button" onClick={() => renderer.current?.zoom(.72)} aria-label="Acercar cámara" title="Acercar"><Icon name="plus" /></button>
       <button type="button" className="icon-button" onClick={() => renderer.current?.zoom(1.4)} aria-label="Alejar cámara" title="Alejar"><Icon name="minus" /></button>
       <button type="button" className="icon-button" onClick={() => renderer.current?.focusOn('system')} aria-label="Mostrar sistema completo" title="Ver sistema completo"><Icon name="crosshair" /></button>
       <div className="space-control-divider" />
-      <button type="button" className="icon-button space-target" onClick={() => renderer.current?.focusOn('earth')} aria-label="Enfocar Tierra" title="Enfocar Tierra"><span aria-hidden="true">🌍</span></button>
-      <button type="button" className="icon-button space-target" onClick={() => renderer.current?.focusOn('moon')} aria-label="Enfocar Luna" title="Enfocar Luna"><span aria-hidden="true">🌕</span></button>
+      <button type="button" className="icon-button space-target" onClick={() => renderer.current?.focusOn('earth')} aria-label={`Enfocar ${bodyName(originId)}`} title={`Enfocar ${bodyName(originId)}`}><span aria-hidden="true">🪐</span></button>
+      <button type="button" className="icon-button space-target" onClick={() => renderer.current?.focusOn('moon')} aria-label={`Enfocar ${bodyName(destinationId)}`} title={`Enfocar ${bodyName(destinationId)}`}><span aria-hidden="true">🪐</span></button>
       {transfer && visible && <button type="button" className="icon-button" onClick={() => renderer.current?.focusOn('ship')} aria-label="Seguir nave" title="Seguir nave"><Icon name="rocket" /></button>}
     </div>
 
@@ -115,11 +119,13 @@ export default function TransferView3D({ date, transfer, state, preview, preview
     </div>
 
     {transfer && transfer.samples.some(sample => {
-      const p = sample.position_m, m = sample.body_positions_m.moon
-      const distance = Math.hypot(p[0] - m[0], p[1] - m[1], p[2] - m[2])
-      return distance < transfer.bodies.moon.radius_m
+      const p = sample.position_m
+      return [originId,destinationId].some(id => {
+        const m=sample.body_positions_m[id], r=transfer.bodies[id]?.radius_m
+        return m && r && Math.hypot(p[0]-m[0],p[1]-m[1],p[2]-m[2])<r
+      })
     }) && <div className="space-physics-warning" role="status">
-      El backend devuelve al menos una posición dentro de la Luna. La vista no modifica la trayectoria física.
+      Posible colisión física: al menos una muestra del backend está dentro del radio de un cuerpo. La vista no altera los cálculos.
     </div>}
     {rendererError && <div className="space-render-error" role="alert"><strong>No se puede mostrar el 3D</strong><p>{rendererError}</p></div>}
     <div className="view-legend space-legend">Arrastra para girar en 3D · Rueda para zoom · Botón derecho para desplazar · {enhanced ? 'Escala visual adaptada para evitar solapamientos'  : 'Radios físicos; nave reducida al acercarse a los cuerpos'} · {sun ? 'Iluminación: dirección JPL' : 'Sin dirección solar JPL: iluminación provisional'}</div>

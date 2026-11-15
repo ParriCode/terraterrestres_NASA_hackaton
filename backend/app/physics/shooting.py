@@ -61,14 +61,15 @@ def solve_shooting(
         validate_vec3(residual, "arrival_residual")
         return np.asarray(residual[:2] if planar else residual, dtype=float) / residual_scale_m
 
+    solver_tolerance = max(1e-14, min(1e-7, arrival_tolerance_m / residual_scale_m * 0.01))
     optimization = least_squares(
         normalized_residual,
         initial,
         method="lm" if planar else "trf",
         max_nfev=max_evaluations,
-        xtol=1e-7,
-        ftol=1e-7,
-        gtol=1e-7,
+        xtol=solver_tolerance,
+        ftol=solver_tolerance,
+        gtol=solver_tolerance,
     )
 
     velocity = tuple(float(value * velocity_scale_m_s) for value in optimization.x)

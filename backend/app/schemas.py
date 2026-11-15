@@ -1,7 +1,7 @@
 """Contrato JSON v1 de ORBITAL 4B para FastAPI (Python 3.10+, Pydantic 2).
 
 Los modelos con sufijo Schema representan la API. Las clases del dominio y
-sus validaciones físicas pertenecen a app.models.domain.
+sus validaciones físicas siguen perteneciendo a app.models.domain (Angel).
 
 Uso en el controlador:
     request: SimulationRequest
@@ -128,11 +128,11 @@ class SimulationConfigSchema(_Schema):
     def scenario_id_not_blank(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("scenario_id no puede estar vacío.")
-        # El servicio comprueba su existencia en el registro de escenarios.
+        # Su existencia se comprueba en el servicio usando el registro de Parri.
         return value
 
     def to_domain(self) -> DomainSimulationConfig:
-        """Construye los objetos de dominio sin modificar la petición recibida."""
+        """Construye los objetos de Angel sin modificar la petición recibida."""
         from .models.domain import SimulationConfig, SpacecraftState
 
         return SimulationConfig(
@@ -164,7 +164,7 @@ class TrajectorySampleSchema(_Schema):
 
 
 class EventSchema(_Schema):
-    """Evento calculado por ORBITAL4B. En v1 solo existe collision."""
+    """Evento calculado por Li. En v1 solo existe collision."""
 
     type: EventType
     t_s: NonNegativeNumber
@@ -173,7 +173,7 @@ class EventSchema(_Schema):
 
 
 class DiagnosticsSchema(_Schema):
-    """Los mínimos del resumen se estiman sobre las muestras guardadas."""
+    """Resumen de Angel; los mínimos se estiman sobre las muestras guardadas."""
 
     final_time_s: NonNegativeNumber
     steps_completed: int = Field(strict=True, ge=0)

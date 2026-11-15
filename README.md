@@ -2,118 +2,67 @@
 
 # 🚀 ORBITAL 4B 🚀
 
-### From Earth to the Moon, one trajectory at a time.
+### De la Tierra a la Luna, una trayectoria cada vez.
 
-**Orbital transfer design and visualization using NASA/JPL Horizons ephemerides.**
+**Diseño y visualización de transferencias orbitales con efemérides de NASA/JPL Horizons.**
 
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
-[![Team](https://img.shields.io/badge/Team-Terraterrestres-8B5CF6)](https://www.spaceappschallenge.org/2026/find-a-team/oculus-terrae/?tab=project)
+![Equipo](https://img.shields.io/badge/Equipo-Terraterrestres-8B5CF6)
 
-[Configure Your Journey](#-configure-your-journey) · [Explore the Results](#-explore-the-results) · [Getting Started](#-getting-started) · [Team](#-team)
+[Configura tu viaje](#-configura-tu-viaje) · [Explora el resultado](#-explora-el-resultado) · [Puesta en marcha](#-puesta-en-marcha) · [Equipo](#-equipo)
 
 </div>
 
 ---
 
-## 🚨 The Mission
+## 🚨 La misión
 
-How can we visualize a space journey intuitively? Do we fully understand what space travel entails?
+¿Como poder visualizar un viaje espacial de forma intuitiva ? ¿ Somos conscientes de lo de que implica realmente viajar al espacio ?  
 
-The **Terraterrestres** team presents **ORBITAL 4B**, an application that explores these questions through an intuitive visual experience built around an **Earth–Moon** transfer prototype.
 
-## 🚨 Project Organization
+Desde el equipo de **Terraterrestres** presentamos **ORBITAL 4B**. Que ofrece una visión visual e intuitiva de estar preguntas materializada en un prototipo de transferencia **Tierra–Luna**: 
 
-### Project Branch Structure
+## 🚨 Configura tu viaje
 
-```mermaid
-flowchart TD
-    A["main"]
-    B["desarrollo"]
+Estos son los datos que puedes cambiar en la aplicación:
 
-    C["desarrollo-Li"]
-    D["desarrollo-Rafa"]
-    E["desarrollo-jose"]
-    F["desarrollo-alesis"]
-    G["desarrollo-Angel"]
-    H["Doc"]
-
-    C --> B
-    D --> B
-    E --> B
-    F --> B
-    G --> B
-    H --> B
-
-    B --> A
-
-    style A fill:#d4edda,stroke:#28a745,color:#155724
-    style B fill:#cce5ff,stroke:#007bff,color:#004085
-    style H fill:#fff3cd,stroke:#ffc107,color:#856404
-```
-
-### Branch Descriptions
-
-| Branch | Description |
-|---|---|
-| `main` | Contains the stable, functional version of the product. |
-| `desarrollo` | Integrates contributions from all team members. |
-| `desarrollo-Li` | Li's individual development branch. |
-| `desarrollo-Rafa` | Rafa's individual development branch. |
-| `desarrollo-jose` | Jose's individual development branch. |
-| `desarrollo-alesis` | Alesis's individual development branch. |
-| `desarrollo-Angel` | Ángel's individual development branch. |
-| `Doc` | Dedicated project documentation branch. |
-
-### Workflow
-
-1. Tasks are assigned to team members.
-2. Each team member develops their assigned tasks in their `desarrollo-name` branch.
-3. Once the assigned tasks are complete, the changes are integrated into `desarrollo`.
-4. Documentation is maintained in `Doc` and integrated into `desarrollo`.
-5. After all changes have been integrated and tested, `desarrollo` is merged into `main`, and the release is tagged.
-6. The `main` branch must always contain a functional, stable product.
-
-## 🚨 Configure Your Journey
-
-The following parameters can be adjusted in the application:
-
-| Option | Description |
+| Opción | ¿Qué significa? |
 | --- | --- |
-| **Departure Date (UTC)** | The launch date. **Celestial body positions change with the selected date.** |
-| **Duration (days)** | The time allocated to complete the mission. |
-| **Minimum Energy** | Prioritizes the valid trajectory found that requires the least launch energy. |
-| **Minimum Distance** | Prioritizes the valid trajectory found with the shortest travel distance. |
+| **Fecha de salida (UTC)** | La fecha de lanzamiento, **LAS POSICIONES DE LOS ASTROS CAMBIAN CON LA FECHA !!** |
+| **Duración (días)** | En cuanto tiempo queremos completar la misión. |
+| **Mínima energía** | Prioriza la trayectoria válida encontrada que requiere menos energía de lanzamiento. |
+| **Mínima distancia** | Prioriza la trayectoria válida encontrada con menor recorrido. |
 
-The angles specify **departure and arrival locations**, rather than the rocket's inclination.
+Los ángulos indican **lugares de salida y llegada**, no la inclinación del cohete. 
 
-## 🚨 Explore the Results
+## 🚨 Explora el resultado
 
-Select **“Calculate Transfer”** to generate a trajectory using Earth and Moon positions from NASA/JPL Horizons. You can then play back the journey, pause it, adjust the playback speed, and navigate through the timeline.
+Pulsa **«Calcular transferencia»** para obtener el recorrido usando las posiciones de la Tierra y la Luna de NASA/JPL Horizons. Después puedes reproducir el viaje, pausarlo, cambiar la velocidad y moverte por el tiempo.
 
-The application displays the **required departure speed and energy**, the **distance traveled**, and the **arrival error**: the distance between the calculated endpoint and the selected destination.
+La aplicación muestra la **velocidad y energía necesarias para salir**, la **distancia recorrida** y el **error de llegada**: cuánto se aleja el punto final calculado del destino elegido.
 
-## 🚨 Solar System and NASA Data
+## 🚨 Sistema solar y datos NASA
 
-You can select an **origin and destination** from the Sun, the eight planets, and the Moon, either through the selection menus or by choosing **“Select on Map”** and clicking a celestial body. The date determines their positions, the duration specifies the available travel time, and the mass is used to calculate the launch energy.
+Puedes elegir **origen y destino** entre el Sol, los ocho planetas y la Luna, usando los selectores o **«Elegir en el mapa»** y pulsando un cuerpo. La fecha determina sus posiciones; la duración indica el tiempo disponible para llegar y la masa permite calcular la energía de lanzamiento.
 
-Position and velocity data are retrieved from [NASA/JPL Horizons](https://ssd-api.jpl.nasa.gov/doc/horizons.html) for the journey's date and time interval. Mean radii and gravitational parameters are obtained from the same service's body data sheets and stored, together with their source and retrieval date, in [the solar system catalog](backend/app/data/solar_bodies.json).
+Las posiciones y velocidades se consultan en [NASA/JPL Horizons](https://ssd-api.jpl.nasa.gov/doc/horizons.html) para la fecha y el intervalo del viaje. Los radios medios y parámetros gravitatorios proceden de las fichas de los cuerpos del mismo servicio y se guardan, con su fuente y fecha de consulta, en [el catálogo solar](backend/app/data/solar_bodies.json).
 
-To improve loading performance, we download hourly samples for each day and display celestial bodies as their data becomes available. Changes in time are interpolated in the browser without additional NASA queries. Responses are cached on the server for up to seven days, including across restarts. Concurrent user requests share downloads, and access to JPL complies with its [limit of one query at a time](https://ssd-api.jpl.nasa.gov/doc/index.php).
+Para acelerar la vista, descargamos muestras horarias de cada día y mostramos los cuerpos conforme llegan. Los cambios de hora se interpolan en el navegador sin volver a consultar NASA. Las respuestas se guardan en el servidor hasta siete días, incluso tras reiniciarlo. Las peticiones simultáneas de los usuarios comparten las descargas; el acceso a JPL respeta su [límite de una consulta a la vez](https://ssd-api.jpl.nasa.gov/doc/index.php).
 
-The solar system view projects these data into 2D and compresses distances to facilitate selection; icons are enlarged. If NASA does not respond, the application displays an error without substituting fabricated positions.
+La vista solar proyecta esos datos en 2D y comprime las distancias para facilitar la selección; los iconos están ampliados. Si NASA no responde, se muestra el error, sin sustituir sus datos por posiciones inventadas.
 
-**Simplified model:** the spacecraft is subject only to the gravitational attraction of the origin and destination bodies. The Sun contributes only when selected as one of these bodies. Celestial bodies follow NASA ephemerides, while the spacecraft's trajectory is calculated by our application. Arrival is defined at the destination's nominal radius, without modeling atmospheres, fuel consumption, or orbital capture. For gas giants and the Sun, this radius does not represent a solid surface.
+**Modelo simplificado:** sobre la nave solo actúa la gravedad del origen y del destino. El Sol solo influye si es uno de los seleccionados. Los cuerpos siguen las efemérides NASA; la trayectoria de la nave la calcula nuestra aplicación. La llegada es al radio nominal del destino, sin modelar atmósferas, combustible ni captura orbital. Para los gigantes gaseosos y el Sol, ese radio no representa suelo sólido.
 
-Journeys of up to 100 years are supported, subject to Horizons coverage. The departure direction is automatically oriented toward an estimated encounter point, and the arrival angle is determined through a search. The search is time-limited and may fail to find a solution; it does not guarantee an optimal route or a physically feasible mission within the full solar system. The lunar orbit and return mode retains its 30-day limit.
+Se admiten viajes de hasta 100 años, sujetos a la cobertura de Horizons. La salida se orienta automáticamente hacia una estimación del encuentro y se busca el ángulo de llegada. La búsqueda tiene tiempo limitado y puede no encontrar una solución; no garantiza la ruta óptima ni una misión físicamente viable en el sistema solar completo. El modo de órbita lunar y regreso conserva su límite de 30 días.
 
-## 🚨 Getting Started
+## 🚨 Puesta en marcha
 
-You will need Python 3.10 or later, a Node.js version compatible with Vite 8, and an internet connection to retrieve NASA data.
+Necesitas Python 3.10 o superior, Node.js compatible con Vite 8 e internet para consultar los datos de NASA.
 
-From the project root, start the server:
+Desde la raíz del proyecto, arranca el servidor:
 
 ```bash
 cd backend
@@ -123,7 +72,7 @@ python -m pip install -e .
 python -m uvicorn app.main:app --reload
 ```
 
-In a separate terminal, start the frontend from the project root:
+En otra terminal, desde la raíz, abre la interfaz:
 
 ```bash
 cd frontend
@@ -131,11 +80,11 @@ npm ci
 npm run dev
 ```
 
-Open **<http://localhost:5173>**. No additional environment variable configuration is required for this local setup.
+Entra en **<http://localhost:5173>**. Con esta configuración local no necesitas cambiar ninguna variable adicional.
 
-📄 [Project Report](docs/main.pdf) · [Technical Documentation](backend/TRANSFER.md)
+📄 [Memoria del proyecto](docs/main.pdf) · [Documentación técnica](backend/TRANSFER.md)
 
-## 🚨 Team
+## 🚨 Equipo
 
 **Terraterrestres**
 
@@ -143,27 +92,13 @@ Open **<http://localhost:5173>**. No additional environment variable configurati
 - Rafael Juan Jimenez
 - Alejandro Moreno Lechado
 - Yaojian Li
-- Angel Olmo Saez
 
 ---
 
-## 🚨 Use of AI
+<div align="center">
 
-- Gemini Hydrogen 4.0: Corrections to minor logical and physics-related errors.
-- ChatGPT Astra 6.0: Conflict resolution when integrating development branches and assistance with project documentation.
-- ChatGPT Sol 5.5: Assistance with the presentation's visual design.
-- Claude Opus 5.5: Assistance with the mathematical implementation of the trajectory function.
+**🌍 Tierra → Trayectoria → Luna 🌙**
 
-## 🚨 References
+*Una herramienta para explorar el viaje, entender el modelo y experimentar con la misión.*
 
-[Differential Equations II — Rafael Ortega, Professor at the University of Granada](https://www.ugr.es/~rortega/Ecuaciones.htm)
-
-Numerical Methods II Course Notes — University of Granada
-
-[JPL Horizons](https://ssd.jpl.nasa.gov/)
-
-[NASA Trajectory Browser](https://trajbrowser.arc.nasa.gov/example_queries.php)
-
-[NASA Planetary Data API](https://ssd.jpl.nasa.gov/api/horizons.api)
-
-[API Documentation](https://ssd-api.jpl.nasa.gov/doc/horizons.html)
+</div>

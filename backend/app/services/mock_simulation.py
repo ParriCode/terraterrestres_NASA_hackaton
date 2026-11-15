@@ -2,7 +2,7 @@
 
 La nave se mueve en línea recta con velocidad constante. Tierra y Luna
 permanecen fijas; no hay RK2, gravedad ni detección de colisiones.
-Los parámetros de demostración no sustituyen las efemérides verificadas.
+Los parámetros redondeados de demostración no sustituyen los datos de Parri.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def propagate_mock(config: SimulationConfig, scenario: ScenarioContext) -> Propa
 def diagnose_mock(
     samples: list[TrajectorySample], bodies: list[CelestialBody]
 ) -> Diagnostics:
-    """Diagnóstico de los estados sintéticos de demostración."""
+    """Diagnóstico de los datos ficticios; Angel conectará su implementación."""
     distances = {
         body.id: min(
             math.dist(sample.spacecraft.position_m, sample.body_positions_m[body.id])
