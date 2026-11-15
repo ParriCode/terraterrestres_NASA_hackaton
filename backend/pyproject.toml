@@ -30,3 +30,7 @@ include = ["app*"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+# Catálogos de cuerpos y datos JSON: necesarios para que el wheel funcione fuera del repo.
+"*" = ["*.json"]

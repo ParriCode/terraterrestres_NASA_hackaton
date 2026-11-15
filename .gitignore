@@ -37,3 +37,4 @@ Thumbs.db
 build/
 *.log
 npm-debug.log*
+.deploy-build/
